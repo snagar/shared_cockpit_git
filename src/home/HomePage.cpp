@@ -265,7 +265,7 @@ void HomePage::ui_popup_about_cai()
     ImGui::Spacing();
     ImGui::TextUnformatted(fmt::format("Designed by {}", info::kDesignedBy).c_str());
     ImGui::TextUnformatted(fmt::format("Coded by {}", info::kCodedBy).c_str());
-    ImGui::TextUnformatted(fmt::format("License: {}", info::kLicense).c_str());
+    // ImGui::TextUnformatted(fmt::format("License: {}", info::kLicense).c_str());
     ImGui::Spacing();
     ui::ui_wrapped_text_cai(std::string(info::kIconCredit), &ui::theme::kTextDim);
     ImGui::Spacing();
