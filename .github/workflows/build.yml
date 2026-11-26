@@ -1,8 +1,10 @@
 # Shared Cockpit - builds the plugin for Linux and Windows.
 #
-# Every push and pull request: both builds, the network self-test, and the plugins as
-# workflow artifacts (Actions > the run > Artifacts). A tag v* (e.g. v0.9.4) also makes a
-# GitHub release with shared_cockpit_<tag>.zip holding both platforms:
+# Runs only for a pushed tag with "beta", "release" or "test" in its name (e.g. v0.9.4-beta,
+# release-0.9.4, test1), or by hand (Actions > build > Run workflow). It builds both platforms,
+# runs the network self-test, keeps the plugins as workflow artifacts (Actions > the run >
+# Artifacts) and makes a GitHub release with shared_cockpit_<tag>.zip holding both platforms
+# ("beta" and "test" tags are marked pre-release):
 #   shared_cockpit/lin_x64/shared_cockpit.xpl
 #   shared_cockpit/win_x64/shared_cockpit.xpl
 #   shared_cockpit/sc_manip_types.ini
@@ -14,9 +16,7 @@ name: build
 
 on:
   push:
-    branches: ["**"]
-    tags: ["v*"]
-  pull_request:
+    tags: ["*beta*", "*release*", "*test*"]    # branch pushes and pull requests do not build
   workflow_dispatch:
 
 permissions:
@@ -85,7 +85,7 @@ jobs:
   release:
     name: release
     needs: build
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/download-artifact@v4
@@ -102,3 +102,4 @@ jobs:
         with:
           files: shared_cockpit_${{ github.ref_name }}.zip
           generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, 'beta') || contains(github.ref_name, 'test') }}
