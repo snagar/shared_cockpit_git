@@ -1,105 +1,268 @@
-# Shared Cockpit - builds the plugin for Linux and Windows.
+# Shared Cockpit - build for Linux and Windows, pack the plugin, publish releases.
 #
-# Runs only for a pushed tag with "beta", "release" or "test" in its name (e.g. v0.9.4-beta,
-# release-0.9.4, test1), or by hand (Actions > build > Run workflow). It builds both platforms,
-# runs the network self-test, keeps the plugins as workflow artifacts (Actions > the run >
-# Artifacts) and makes a GitHub release with shared_cockpit_<tag>.zip holding both platforms
-# ("beta" and "test" tags are marked pre-release):
+# When it runs (plain pushes and pull requests do NOT start it):
+#   - a pushed tag with "release", "beta" or "test" in its name; it builds both systems
+#     and publishes a GitHub Release:
+#       0.9.4-release, release-0.9.4 ...... release       Release + Debug builds
+#       0.9.4-beta2,   beta-0.9.4 ......... pre-release   Release + Debug builds
+#       0.9.4-test3,   test1 .............. pre-release   Debug build only (faster)
+#     Any other tag is ignored ("test" wins over "beta", "beta" over "release").
+#   - by hand: Actions tab > "build - Linux and Windows" > Run workflow. Debug build
+#     only; the zip is kept as a workflow artifact, nothing is published.
+#
+# The X-Plane SDK: each build job unpacks libs/XPSDK.zip into libs/xpsdk/ (step
+# "Extract XPSDK") before CMake runs. Laminar's zip has had different top folder names
+# (SDK, sdk, xpsdk-master); the step renames whichever it finds to xpsdk.
+#
+# The result of a tagged build, attached to the release:
+#   shared_cockpit-<tag>.zip          the plugin folder, ready to copy into
+#                                     X-Plane/Resources/plugins/ (not for test builds)
+#   shared_cockpit-<tag>-debug.zip    the same folder with the Debug builds
+#                                     (more detail in the log; for troubleshooting)
+# The folder inside:
 #   shared_cockpit/lin_x64/shared_cockpit.xpl
 #   shared_cockpit/win_x64/shared_cockpit.xpl
-#   shared_cockpit/sc_manip_types.ini
-#
-# The third-party libraries are expected in libs/ (as in the repository). The X-Plane SDK
-# comes from libs/XPSDK.zip, unpacked to libs/xpsdk when that folder is not committed.
-
-name: build
+#   shared_cockpit/sc_manip_types.ini, LICENSE, README.md, COMPATIBILITY.md, build.txt
+name: build - Linux and Windows
 
 on:
   push:
-    tags: ["*beta*", "*release*", "*test*"]    # branch pushes and pull requests do not build
-  workflow_dispatch:
+    tags:                     # only these tags; branch pushes never start the workflow
+      - '*release*'
+      - '*beta*'
+      - '*test*'
+  workflow_dispatch:          # Run workflow button (build only)
 
 permissions:
-  contents: write          # the release on a tag
+  contents: read
+
+env:
+  PLUGIN_NAME: shared_cockpit
 
 jobs:
-  build:
-    name: ${{ matrix.name }}
-    runs-on: ${{ matrix.os }}
+  # --- What kind of build is this? ---------------------------------------------------
+  pre-build:
+    runs-on: ubuntu-latest
+    outputs:
+      kind: ${{ steps.kind.outputs.kind }}               # release | beta | test | build
+      prerelease: ${{ steps.kind.outputs.prerelease }}   # true | false
+      version: ${{ steps.kind.outputs.version }}         # kVersion.kBuild in src/SharedInfo.h
+      build_types: ${{ steps.kind.outputs.build_types }} # JSON list for the build matrices
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Work out the build kind from the tag
+        id: kind
+        shell: bash
+        run: |
+          kind="build"
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            tag="${GITHUB_REF_NAME}"
+            if   [[ "$tag" == *test* ]];    then kind="test"
+            elif [[ "$tag" == *beta* ]];    then kind="beta"
+            elif [[ "$tag" == *release* ]]; then kind="release"
+            fi
+          fi
+          prerelease="false"
+          [[ "$kind" == "beta" || "$kind" == "test" ]] && prerelease="true"
+          ver=$(sed -n 's/.*kVersion *= *"\([0-9.]*\)".*/\1/p' src/SharedInfo.h)
+          bld=$(sed -n 's/.*kBuild *= *"\([0-9]*\)".*/\1/p' src/SharedInfo.h)
+          version="${ver}.${bld}"
+          build_types='["Release","Debug"]'
+          [[ "$kind" == "test" || "$kind" == "build" ]] && build_types='["Debug"]'
+          echo "build_types=$build_types" >> "$GITHUB_OUTPUT"
+          echo "kind=$kind" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "### Build kind: \`$kind\` (ref ${GITHUB_REF_NAME}, plugin version ${version})" >> "$GITHUB_STEP_SUMMARY"
+          if [[ "${GITHUB_REF_TYPE}" == "tag" && "${GITHUB_REF_NAME}" != *"$version"* ]]; then
+            echo "::warning::Tag ${GITHUB_REF_NAME} does not contain the plugin version ${version} (src/SharedInfo.h)"
+          fi
+
+  # --- Linux -------------------------------------------------------------------------
+  # Ubuntu 22.04, so the plugin also loads on older distributions (glibc 2.35 or newer).
+  # The C++ runtime is linked statically (CMakeLists).
+  build-lin:
+    needs: [pre-build]
+    runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - name: linux
-            os: ubuntu-22.04            # glibc 2.35: also loads on newer distributions
-            platform: lin_x64
-            exe: ""
-          - name: windows
-            os: windows-2022            # Visual Studio 2022, static runtime (CMakeLists)
-            platform: win_x64
-            exe: ".exe"
-    defaults:
-      run:
-        shell: bash
-
+        build_type: ${{ fromJSON(needs.pre-build.outputs.build_types) }}
     steps:
-      - uses: actions/checkout@v4
-
-      - name: OpenGL headers (Linux)
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libgl-dev
-
-      - name: X-Plane SDK
+      - name: Install the build tools
+        shell: bash
         run: |
-          if [ ! -f libs/xpsdk/CHeaders/XPLM/XPLMDefs.h ]; then
-            rm -rf libs/xpsdk _sdk && mkdir _sdk
-            (cd _sdk && cmake -E tar xf ../libs/XPSDK.zip)
-            mv _sdk/SDK libs/xpsdk && rm -rf _sdk
+          export DEBIAN_FRONTEND=noninteractive
+          APT_OPTS="-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=60"
+          sudo apt-get $APT_OPTS update
+          sudo apt-get $APT_OPTS install -y --no-install-recommends cmake libgl-dev file unzip
+
+      - uses: actions/checkout@v6
+
+      - name: Extract XPSDK
+        shell: bash
+        run: |
+          cd libs
+          rm -rf xpsdk SDK sdk xpsdk-master
+          unzip -q -o XPSDK.zip
+          if [ ! -d xpsdk ]; then
+            if   [ -d SDK ];          then mv SDK xpsdk
+            elif [ -d sdk ];          then mv sdk xpsdk
+            elif [ -d xpsdk-master ]; then mv xpsdk-master xpsdk
+            fi
           fi
-          ls libs/xpsdk/CHeaders/XPLM/XPLMDefs.h
+          test -f xpsdk/CHeaders/XPLM/XPLMDefs.h || { echo "::error::libs/XPSDK.zip: no CHeaders/XPLM/XPLMDefs.h under a known folder name"; exit 1; }
 
       - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DSC_DEPLOY=OFF -DSC_BUILD_TOOLS=ON
+        run: >
+          cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+          -DSC_DEPLOY=OFF -DSC_BUILD_TOOLS=ON
 
       - name: Build
-        run: cmake --build build --config Release --parallel
+        run: cmake --build build -j "$(nproc)"
 
       - name: Network self-test
+        shell: bash
         run: |
-          tool="$(find build -type f -name "sc_net_test${{ matrix.exe }}" | head -n 1)"
-          echo "self-test: $tool"
           mkdir -p _selftest && cd _selftest
-          "../$tool" --selftest --quiet
+          ../build/tools/sc_net_test --selftest --quiet
 
-      - name: Package
+      - name: Check the plugin file
+        shell: bash
         run: |
-          cmake --install build --config Release --prefix _out
-          ls -R _out
+          xpl="build/${PLUGIN_NAME}/lin_x64/${PLUGIN_NAME}.xpl"
+          file "$xpl"
+          echo "Needed libraries:"; objdump -p "$xpl" | grep NEEDED
+          echo "Exported functions:"; objdump -T "$xpl" | grep -E "XPlugin" || true
+          if objdump -p "$xpl" | grep -q "libstdc++"; then
+            echo "::error::The Linux plugin must not need libstdc++.so (it is linked statically)"; exit 1
+          fi
 
-      - uses: actions/upload-artifact@v4
+      - name: Stage the plugin
+        run: cmake --install build --prefix _out
+
+      - uses: actions/upload-artifact@v7
         with:
-          name: shared_cockpit_${{ matrix.platform }}
-          path: _out/shared_cockpit
+          name: plugin-lin-${{ matrix.build_type }}
+          path: _out/${{ env.PLUGIN_NAME }}/
           if-no-files-found: error
 
-  release:
-    name: release
-    needs: build
-    if: startsWith(github.ref, 'refs/tags/')
-    runs-on: ubuntu-22.04
+  # --- Windows -----------------------------------------------------------------------
+  # Visual Studio 2022 (MSVC), 64-bit; the C++ runtime is linked into the plugin (/MT).
+  build-win:
+    needs: [pre-build]
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        build_type: ${{ fromJSON(needs.pre-build.outputs.build_types) }}
     steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: _art
-      - name: Zip both platforms
+      - uses: actions/checkout@v6
+
+      - name: Extract XPSDK
+        shell: pwsh
         run: |
-          mkdir -p shared_cockpit
-          cp -r _art/shared_cockpit_lin_x64/. shared_cockpit/
-          cp -r _art/shared_cockpit_win_x64/. shared_cockpit/
-          zip -r "shared_cockpit_${GITHUB_REF_NAME}.zip" shared_cockpit
-          unzip -l "shared_cockpit_${GITHUB_REF_NAME}.zip"
-      - uses: softprops/action-gh-release@v2
+          cd libs
+          Remove-Item -Recurse -Force xpsdk, SDK, sdk, xpsdk-master -ErrorAction SilentlyContinue
+          Expand-Archive XPSDK.zip -DestinationPath . -Force
+          if (-not (Test-Path xpsdk -PathType Container)) {
+              if     (Test-Path SDK -PathType Container)          { Rename-Item SDK xpsdk }
+              elseif (Test-Path xpsdk-master -PathType Container) { Rename-Item xpsdk-master xpsdk }
+          }
+          if (-not (Test-Path xpsdk/Libraries/Win/XPLM_64.lib)) {
+              Write-Host "::error::libs/XPSDK.zip: no Libraries/Win/XPLM_64.lib under a known folder name"; exit 1
+          }
+
+      - name: Configure
+        run: >
+          cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+          -DSC_DEPLOY=OFF -DSC_BUILD_TOOLS=ON
+
+      - name: Build
+        run: cmake --build build --config ${{ matrix.build_type }} --parallel
+
+      - name: Network self-test
+        shell: bash
+        run: |
+          mkdir -p _selftest && cd _selftest
+          "../build/${{ matrix.build_type }}/tools/sc_net_test.exe" --selftest --quiet
+
+      - name: Stage the plugin
+        shell: bash
+        run: |
+          cmake --install build --config ${{ matrix.build_type }} --prefix _out
+          ls -lR _out
+
+      - uses: actions/upload-artifact@v7
         with:
-          files: shared_cockpit_${{ github.ref_name }}.zip
-          generate_release_notes: true
-          prerelease: ${{ contains(github.ref_name, 'beta') || contains(github.ref_name, 'test') }}
+          name: plugin-win-${{ matrix.build_type }}
+          path: _out/${{ env.PLUGIN_NAME }}/
+          if-no-files-found: error
+
+  # --- One plugin folder for both systems ----------------------------------------------
+  package:
+    needs: [pre-build, build-lin, build-win]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write                     # to create the GitHub Release
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/download-artifact@v8
+        with:
+          path: download
+
+      - name: Assemble the plugin folders and zip them
+        id: zip
+        shell: bash
+        run: |
+          set -e
+          label="${GITHUB_REF_NAME//\//-}"
+          files=""
+          for type in Release Debug; do
+            [[ -d "download/plugin-lin-${type}" ]] || continue        # only the types built
+            out="dist/${type}/${PLUGIN_NAME}"
+            mkdir -p "$out"
+            for os in lin win; do
+              cp -R "download/plugin-${os}-${type}/." "$out/"
+            done
+            cp LICENSE README.md docs/COMPATIBILITY.md "$out/"
+            echo "Shared Cockpit ${{ needs.pre-build.outputs.version }} - ${GITHUB_REF_NAME} ${type} (${GITHUB_SHA::8})" > "$out/build.txt"
+            zip_name="${PLUGIN_NAME}-${label}.zip"
+            [[ "$type" == "Debug" ]] && zip_name="${PLUGIN_NAME}-${label}-debug.zip"
+            (cd "dist/${type}" && zip -r -9 "../../${zip_name}" "${PLUGIN_NAME}")
+            files="${files}${zip_name}"$'\n'
+          done
+          find dist -type f | sort
+          ls -l *.zip
+          {
+            echo "files<<EOF"
+            printf '%s' "$files"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.PLUGIN_NAME }}-all-platforms
+          path: "*.zip"
+
+      - name: Release notes
+        if: needs.pre-build.outputs.kind != 'build'
+        shell: bash
+        run: |
+          if [[ ! -f notes.md ]]; then
+            echo "Shared Cockpit ${{ needs.pre-build.outputs.version }} (${GITHUB_REF_NAME})" > notes.md
+            echo "" >> notes.md
+            echo "Unzip into X-Plane/Resources/plugins/. Everybody in a session needs the same version." >> notes.md
+          fi
+
+      - name: Publish the GitHub Release
+        if: needs.pre-build.outputs.kind != 'build'
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "${{ needs.pre-build.outputs.kind }}: ${{ github.ref_name }}"
+          body_path: notes.md
+          prerelease: ${{ needs.pre-build.outputs.prerelease == 'true' }}
+          files: ${{ steps.zip.outputs.files }}
