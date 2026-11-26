@@ -55,6 +55,8 @@ void SetMirrorLevel_cai(Level level);
 void Mirror_cai(std::string_view line);
 // Messages above this level are dropped (Debug in debug builds, Info otherwise).
 void SetLevel_cai(Level level);
+// The build's level: Debug in a Debug build, Info in a Release build ([debug] log_level=default).
+Level DefaultLevel_cai();
 // True when messages of `level` are written.
 bool IsEnabled_cai(Level level);
 // The log file in use.

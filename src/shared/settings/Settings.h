@@ -67,8 +67,10 @@ struct FlightDeckSettings {
 // Debugging helps (personal, not session rules).
 //   [debug]
 //   flight_trace=0               ; 1: shared_cockpit_trace.csv, 10 rows a second while in a session
+//   log_level=default            ; default: info in a Release build, debug in a Debug build; info; debug
 struct DebugSettings {
     bool flightTrace = false;
+    int  logLevel = -1;          // -1 the build's default, 0 info, 1 debug (Home > About)
 };
 
 class Settings {

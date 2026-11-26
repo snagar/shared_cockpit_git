@@ -235,6 +235,10 @@ PLUGIN_API int XPluginStart(char* outName, char* outSig, char* outDesc)
 
     std::string settingsError;
     gSettings.Load_cai(globals.pluginFolder / "shared_cockpit.ini", settingsError);
+    if (gSettings.debug.logLevel >= 0)                       // [debug] log_level: info or debug, in any build
+        sc::log::SetLevel_cai(gSettings.debug.logLevel == 1 ? sc::log::Level::Debug : sc::log::Level::Info);
+    LOG_INFO("log level: {}{}", sc::log::IsEnabled_cai(sc::log::Level::Debug) ? "debug" : "info",
+             gSettings.debug.logLevel < 0 ? " (the build's default)" : "");
     gHub.Session_cai().SetOwnRules_cai(gSettings.rules);   // the session's rules when I host
     XPLMRegisterFlightLoopCallback(FlightLoop_cai, -1.0f, nullptr);
 

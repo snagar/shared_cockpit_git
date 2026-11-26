@@ -3,6 +3,7 @@
 #include "home/HomePage.h"
 
 #include <algorithm>
+#include <vector>
 
 #include "fmt/format.h"
 #include "IconsFontAwesome5.h"
@@ -13,7 +14,9 @@
 #include "SharedInfo.h"
 #include "shared/ui/ShareCard.h"
 #include "shared/ui/Widgets.h"
+#include "shared/util/Libraries.h"
 #include "shared/util/Utils.h"
+#include "XPLMDefs.h"
 #include "shared/xp/XPlane.h"
 
 namespace sc::pages {
@@ -236,11 +239,59 @@ void HomePage::ui_popup_about_cai()
         ui::ui_wrapped_text_cai(flight.tracePath.empty() ? std::string("shared_cockpit_trace.csv") : flight.tracePath, &ui::theme::kTextDim);
     }
     ImGui::Spacing();
+    // The plugin log's detail (for testing): saved in [debug], applies at once, in any build.
+    {
+        const bool detailed = log::IsEnabled_cai(log::Level::Debug);
+        ImGui::TextUnformatted("Plugin log:");
+        ImGui::SameLine();
+        int choice = detailed ? 1 : 0;
+        bool picked = ImGui::RadioButton("Normal##loglevel", &choice, 0);
+        ImGui::SameLine();
+        picked |= ImGui::RadioButton("Detailed (debug)##loglevel", &choice, 1);
+        if (picked && (choice == 1) != detailed) {
+            mSettings.debug.logLevel = choice;
+            log::SetLevel_cai(choice == 1 ? log::Level::Debug : log::Level::Info);
+            std::string error;
+            mSettings.Save_cai(error);
+            LOG_INFO("log level: {} (About box)", choice == 1 ? "debug" : "info");
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::BeginTooltip();
+            ImGui::TextUnformatted("Detailed adds window, page and network details to the plugin log (larger log). "
+                                   "Saved; applies at once.");
+            ImGui::EndTooltip();
+        }
+    }
+    ImGui::Spacing();
     ImGui::TextUnformatted(fmt::format("Designed by {}", info::kDesignedBy).c_str());
     ImGui::TextUnformatted(fmt::format("Coded by {}", info::kCodedBy).c_str());
     ImGui::TextUnformatted(fmt::format("License: {}", info::kLicense).c_str());
     ImGui::Spacing();
     ui::ui_wrapped_text_cai(std::string(info::kIconCredit), &ui::theme::kTextDim);
+    ImGui::Spacing();
+    // The libraries we build with (versions from their headers).
+    if (ImGui::CollapsingHeader("Libraries")) {
+        std::vector<util::Library> libraries = {
+            {"Dear ImGui", IMGUI_VERSION, "MIT", "the windows"},
+            {"ImgWindow", "", "BSD-2-Clause", "ImGui in X-Plane windows"},
+            {"X-Plane SDK", fmt::format("{}.{}.{}", kXPLM_Version / 100, kXPLM_Version / 10 % 10, kXPLM_Version % 10),
+             "Laminar Research", "the X-Plane plugin API"},
+        };
+        for (auto& library : util::CoreLibraries_cai())
+            libraries.push_back(std::move(library));
+        if (ImGui::BeginTable("##libraries", 3, ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_RowBg)) {
+            for (const util::Library& library : libraries) {
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0);
+                ImGui::TextUnformatted(library.name.c_str());
+                ImGui::TableSetColumnIndex(1);
+                ImGui::TextDisabled("%s", library.version.empty() ? "-" : library.version.c_str());
+                ImGui::TableSetColumnIndex(2);
+                ImGui::TextDisabled("%s - %s", library.license.c_str(), library.use.c_str());
+            }
+            ImGui::EndTable();
+        }
+    }
     ImGui::Spacing();
     if (ui::ui_button_cai("Close", ImVec2(ImGui::GetContentRegionAvail().x, 40.0f)))
         ImGui::CloseCurrentPopup();

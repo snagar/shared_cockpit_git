@@ -60,6 +60,10 @@ bool Settings::Load_cai(const std::filesystem::path& file, std::string& error)
         if (section == "debug") {
             if (key == "flight_trace")
                 dbg.flightTrace = value != "0" && Utils::Lower_cai(value) != "false" && Utils::Lower_cai(value) != "no";
+            else if (key == "log_level") {
+                const std::string level = Utils::Lower_cai(value);
+                dbg.logLevel = level == "debug" ? 1 : level == "info" ? 0 : -1;
+            }
             continue;
         }
         if (section == "flightdeck") {
@@ -164,7 +168,8 @@ bool Settings::Save_cai(std::string& error) const
                         rules.weather ? 1 : 0, rules.weatherS, rules.time ? 1 : 0, rules.timeToleranceS,
                         rules.flight == net::FlightMode::Follow ? "follow" : "inputs", rules.smoothingMs,
                         rules.followStrict ? 1 : 0, rules.shareLoad ? 1 : 0, rules.handoverBlendMs, rules.copilotAxes ? 1 : 0);
-    text += fmt::format("\n[debug]\nflight_trace={}\n", debug.flightTrace ? 1 : 0);
+    text += fmt::format("\n[debug]\nflight_trace={}\nlog_level={}\n", debug.flightTrace ? 1 : 0,
+                        debug.logLevel == 1 ? "debug" : debug.logLevel == 0 ? "info" : "default");
     if (!Utils::WriteFileSafely_cai(mFile, text, error)) {
         LOG_WARN("cannot save the settings: {}", error);
         return false;

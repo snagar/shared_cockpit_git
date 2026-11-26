@@ -164,6 +164,8 @@ target_link_libraries(loguru PUBLIC Threads::Threads ${CMAKE_DL_LIBS})
 # Analysis, store, log and network: everything the command-line tools need too.
 set(SC_CORE_SOURCES
     src/shared/util/Utils.cpp
+    src/shared/util/Libraries.cpp
+    src/shared/util/Libraries.h
     src/shared/util/Utils.h
     src/shared/util/StopThread.h
     src/shared/analysis/Analysis.cpp

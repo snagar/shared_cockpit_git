@@ -275,6 +275,16 @@ void SetMirrorLevel_cai(Level level) { gMirrorLevel.store(static_cast<int>(level
 void Mirror_cai(std::string_view line) { XPlaneLine_cai(Level::Info, line); }
 // Messages above this level are dropped.
 void SetLevel_cai(Level level)            { gLevel.store(static_cast<int>(level)); }
+
+// The build's level.
+Level DefaultLevel_cai()
+{
+#ifdef NDEBUG
+    return Level::Info;
+#else
+    return Level::Debug;
+#endif
+}
 // True when messages of `level` are written.
 bool IsEnabled_cai(Level level)           { return static_cast<int>(level) <= gLevel.load(); }
 
