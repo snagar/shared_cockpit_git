@@ -1,0 +1,104 @@
+# Shared Cockpit - builds the plugin for Linux and Windows.
+#
+# Every push and pull request: both builds, the network self-test, and the plugins as
+# workflow artifacts (Actions > the run > Artifacts). A tag v* (e.g. v0.9.4) also makes a
+# GitHub release with shared_cockpit_<tag>.zip holding both platforms:
+#   shared_cockpit/lin_x64/shared_cockpit.xpl
+#   shared_cockpit/win_x64/shared_cockpit.xpl
+#   shared_cockpit/sc_manip_types.ini
+#
+# The third-party libraries are expected in libs/ (as in the repository). The X-Plane SDK
+# comes from libs/XPSDK.zip, unpacked to libs/xpsdk when that folder is not committed.
+
+name: build
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write          # the release on a tag
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux
+            os: ubuntu-22.04            # glibc 2.35: also loads on newer distributions
+            platform: lin_x64
+            exe: ""
+          - name: windows
+            os: windows-2022            # Visual Studio 2022, static runtime (CMakeLists)
+            platform: win_x64
+            exe: ".exe"
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: OpenGL headers (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libgl-dev
+
+      - name: X-Plane SDK
+        run: |
+          if [ ! -f libs/xpsdk/CHeaders/XPLM/XPLMDefs.h ]; then
+            rm -rf libs/xpsdk _sdk && mkdir _sdk
+            (cd _sdk && cmake -E tar xf ../libs/XPSDK.zip)
+            mv _sdk/SDK libs/xpsdk && rm -rf _sdk
+          fi
+          ls libs/xpsdk/CHeaders/XPLM/XPLMDefs.h
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DSC_DEPLOY=OFF -DSC_BUILD_TOOLS=ON
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Network self-test
+        run: |
+          tool="$(find build -type f -name "sc_net_test${{ matrix.exe }}" | head -n 1)"
+          echo "self-test: $tool"
+          mkdir -p _selftest && cd _selftest
+          "../$tool" --selftest --quiet
+
+      - name: Package
+        run: |
+          cmake --install build --config Release --prefix _out
+          ls -R _out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shared_cockpit_${{ matrix.platform }}
+          path: _out/shared_cockpit
+          if-no-files-found: error
+
+  release:
+    name: release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: _art
+      - name: Zip both platforms
+        run: |
+          mkdir -p shared_cockpit
+          cp -r _art/shared_cockpit_lin_x64/. shared_cockpit/
+          cp -r _art/shared_cockpit_win_x64/. shared_cockpit/
+          zip -r "shared_cockpit_${GITHUB_REF_NAME}.zip" shared_cockpit
+          unzip -l "shared_cockpit_${GITHUB_REF_NAME}.zip"
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: shared_cockpit_${{ github.ref_name }}.zip
+          generate_release_notes: true
