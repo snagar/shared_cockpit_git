@@ -140,3 +140,8 @@ shared too - each simulator would send the same command. The same for datarefs a
 writes every frame (animations, computed positions): they should not be ticked in the analysis -
 "N a minute" in the Sharing box climbing with nobody touching anything points to one.
 The log's Debug lines show who sent what (and the full dataref name).
+
+* **Seats** (`SeatSync`, 0.9.6): the loaded aircraft's vrconfig teleport hotspots
+  (`analysis/VrSeats`), re-read when the aircraft or the file changes; the host's go to everybody.
+  Picking one writes `sim/graphics/view/pilots_head_x/y/z/psi/the/phi` in the 3D cockpit view
+  (switching to it first; applied for 3 frames). Not in VR. Commands: back_to_my_seat, next, previous.

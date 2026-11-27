@@ -174,7 +174,8 @@ constexpr MsgType kTypes[] = {MsgType::Hello, MsgType::Challenge, MsgType::Proof
                               MsgType::Notice, MsgType::Command, MsgType::Reject, MsgType::Values,
                               MsgType::Correction, MsgType::Snapshot, MsgType::Priority, MsgType::Position,
                               MsgType::Weather, MsgType::SnapshotRequest, MsgType::Rules, MsgType::FlightInputs,
-                              MsgType::Pause, MsgType::CopilotInputs, MsgType::FlightState, MsgType::Load};
+                              MsgType::Pause, MsgType::CopilotInputs, MsgType::FlightState, MsgType::Load,
+                              MsgType::Seats, MsgType::SeatChoice};
 
 } // namespace
 
@@ -211,6 +212,8 @@ const char* MsgTypeName_cai(MsgType type)
         case MsgType::CopilotInputs:  return "CopilotInputs";
         case MsgType::FlightState:    return "FlightState";
         case MsgType::Load:           return "Load";
+        case MsgType::Seats:          return "Seats";
+        case MsgType::SeatChoice:     return "SeatChoice";
     }
     return "?";
 }
@@ -286,7 +289,7 @@ Bytes EncodeMessage_cai(const Message& message)
             w.U8_cai(static_cast<std::uint8_t>(m.people.size()));
             for (const Person& p : m.people) {
                 w.U8_cai(p.id); w.Str_cai(p.name); w.U8_cai(static_cast<std::uint8_t>(p.role)); w.Bool_cai(p.master);
-                w.Bool_cai(p.pic); w.U16_cai(p.pingMs); w.U8_cai(p.flags);
+                w.Bool_cai(p.pic); w.U16_cai(p.pingMs); w.U8_cai(p.flags); w.U8_cai(p.seat);
             }
         } else if constexpr (std::is_same_v<T, MsgControlRequest>) {
             w.U8_cai(m.fromId);
@@ -362,6 +365,16 @@ Bytes EncodeMessage_cai(const Message& message)
             };
             w.U8_cai(m.id); lmbda_list(l.fuel); lmbda_list(l.stations);
             w.F32_cai(l.payload); w.F32_cai(l.cgz); w.F32_cai(l.cgx); w.Bool_cai(l.useStations);
+        } else if constexpr (std::is_same_v<T, MsgSeats>) {
+            const std::size_t n = std::min<std::size_t>(m.seats.size(), kMaxSeats);
+            w.U8_cai(static_cast<std::uint8_t>(n));
+            for (std::size_t i = 0; i < n; ++i) {
+                const SeatInfo& s = m.seats[i];
+                w.Str_cai(s.name); w.Bool_cai(s.sitting);
+                w.F32_cai(s.x); w.F32_cai(s.y); w.F32_cai(s.z); w.F32_cai(s.psi); w.F32_cai(s.the); w.F32_cai(s.phi);
+            }
+        } else if constexpr (std::is_same_v<T, MsgSeatChoice>) {
+            w.U8_cai(m.id); w.U8_cai(m.seat);
         } else if constexpr (std::is_same_v<T, MsgRules>) {
             const SessionRules& r = m.rules;
             w.U16_cai(static_cast<std::uint16_t>(r.rate)); w.U16_cai(static_cast<std::uint16_t>(r.conflictMs));
@@ -411,7 +424,7 @@ std::optional<Message> DecodeMessage_cai(const std::uint8_t* data, std::size_t s
             const std::uint8_t count = r.U8_cai();
             for (std::uint8_t i = 0; i < count && r.Ok_cai(); ++i) {
                 Person p; p.id = r.U8_cai(); p.name = r.Str_cai(); p.role = static_cast<Role>(r.U8_cai()); p.master = r.Bool_cai();
-                p.pic = r.Bool_cai(); p.pingMs = r.U16_cai(); p.flags = r.U8_cai();
+                p.pic = r.Bool_cai(); p.pingMs = r.U16_cai(); p.flags = r.U8_cai(); p.seat = r.U8_cai();
                 m.people.push_back(std::move(p));
             }
             out = m; break;
@@ -499,6 +512,22 @@ std::optional<Message> DecodeMessage_cai(const std::uint8_t* data, std::size_t s
             l.payload = r.F32_cai(); l.cgz = r.F32_cai(); l.cgx = r.F32_cai(); l.useStations = r.Bool_cai();
             out = m; break;
         }
+        case MsgType::Seats: {
+            MsgSeats m;
+            const std::size_t n = r.U8_cai();
+            if (n > static_cast<std::size_t>(kMaxSeats)) {
+                r.Fail_cai();
+            } else {
+                m.seats.resize(n);
+                for (SeatInfo& s : m.seats) {
+                    s.name = r.Str_cai(); s.sitting = r.Bool_cai();
+                    s.x = r.F32_cai(); s.y = r.F32_cai(); s.z = r.F32_cai();
+                    s.psi = r.F32_cai(); s.the = r.F32_cai(); s.phi = r.F32_cai();
+                }
+            }
+            out = m; break;
+        }
+        case MsgType::SeatChoice: { MsgSeatChoice m; m.id = r.U8_cai(); m.seat = r.U8_cai(); out = m; break; }
         case MsgType::Rules: {
             MsgRules m; SessionRules& x = m.rules;
             x.rate = r.U16_cai(); x.conflictMs = r.U16_cai(); x.groundM = r.U16_cai(); x.headingDeg = r.U16_cai();

@@ -15,7 +15,7 @@ namespace sc::net {
 // --- Message header: 'S' 'C' <protocol> <type> ------------------------------------------
 inline constexpr std::uint8_t kMagic0          = 'S';
 inline constexpr std::uint8_t kMagic1          = 'C';
-inline constexpr std::uint8_t kProtocolVersion = 9;   // 2: commands (0.4), 3: datarefs, priority (0.5), 4: position, weather (0.6), 5: rules (0.7), 6: flight inputs, pause (0.8), 7: copilot axes (0.8.3), 8: follow, load (0.9), 9: handover blend (0.9.1)
+inline constexpr std::uint8_t kProtocolVersion = 10;  // 2: commands (0.4), 3: datarefs, priority (0.5), 4: position, weather (0.6), 5: rules (0.7), 6: flight inputs, pause (0.8), 7: copilot axes (0.8.3), 8: follow, load (0.9), 9: handover blend (0.9.1), 10: seats (0.9.6)
 inline constexpr std::size_t  kHeaderSize      = 4;
 
 // --- Connections ---------------------------------------------------------------------
@@ -73,6 +73,8 @@ enum class MsgType : std::uint8_t {
     CopilotInputs  = 28,    // the copilot's stick / yoke / pedals on X-Plane's copilot side (unreliable; protocol 7)
     FlightState    = 29,    // the PIC's aircraft: position, attitude, speeds (unreliable, ~30 a second; protocol 8)
     Load           = 30,    // the PIC's fuel and payload (protocol 8)
+    Seats          = 31,    // the host's seats (its aircraft's vrconfig hotspots), host -> everybody (protocol 10)
+    SeatChoice     = 32,    // a joiner picked a seat, joiner -> host (protocol 10)
 };
 
 // How often everybody sends its position, and the host its weather (seconds).
@@ -82,7 +84,9 @@ inline constexpr int    kMaxEngines       = 16;
 inline constexpr double kCopilotStaleS    = 0.5;   // copilot inputs older than this: centred (a lost link must not hold a deflection)    // array elements sent per lever (throttle, prop, mixture)
 inline constexpr double kFlightStateRate  = 30.0;  // the PIC's aircraft state a second (Follow)
 inline constexpr double kFollowMaxM       = 20000.0; // Follow: farther from the PIC than this, "Move to PIC" (a new flight) first
-inline constexpr int    kMaxLoadValues    = 32;    // fuel tanks / payload stations sent at most
+inline constexpr int    kMaxLoadValues    = 32;
+inline constexpr int    kMaxSeats         = 16;    // seats sent at most
+inline constexpr std::uint8_t kNoSeat     = 0xFF;  // Person::seat: none picked    // fuel tanks / payload stations sent at most
 inline constexpr double kWeatherMinGap    = 10.0;   // a weather change is sent at once, but not more often than this
 
 // The most values in one message (a snapshot is sent in parts of this size).

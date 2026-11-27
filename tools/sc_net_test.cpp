@@ -1750,6 +1750,33 @@ public:
                       error);
         }
 
+        // 12h. Seats (protocol 10): the host's seats reach everybody; picks show in the people list.
+        {
+            std::vector<SeatInfo> seats = {{"Pilot's Seat", true, -0.2438f, 0.42f, 0.07f, 0.0f, 0.0f, 0.0f},
+                                           {"CoPilot's Seat", true, 0.2438f, 0.42f, 0.07f, 0.0f, 0.0f, 0.0f}};
+            host.SetOwnSeats_cai(seats);
+            auto lmbda_seats = [&bob](std::size_t n) { return [&bob, n] { return bob.SessionSeats_cai().size() == n; }; };
+            lmbda_pump(3, lmbda_seats(2));
+            Check_cai("the host's seats reach the joiners", bob.SessionSeats_cai() == seats && cid.SessionSeats_cai() == seats, "");
+            bob.PickSeat_cai(1);
+            host.PickSeat_cai(0);
+            auto lmbda_seatOf = [](const NetSession& who, std::uint8_t id) {
+                const Person* p = who.Find_cai(id);
+                return p ? p->seat : kNoSeat;
+            };
+            lmbda_pump(3, [&] { return lmbda_seatOf(cid, bob.MyId_cai()) == 1 && lmbda_seatOf(cid, kHostId) == 0; });
+            Check_cai("everybody sees who sits where", lmbda_seatOf(cid, bob.MyId_cai()) == 1 && lmbda_seatOf(cid, kHostId) == 0 &&
+                      lmbda_seatOf(host, bob.MyId_cai()) == 1, "");
+            seats.push_back({"Engineer", true, 0.0f, 0.4f, 1.2f, 90.0f, 0.0f, 0.0f});
+            host.SetOwnSeats_cai(seats);
+            lmbda_pump(3, lmbda_seats(3));
+            lmbda_pump(3, [&] { return lmbda_seatOf(cid, bob.MyId_cai()) == kNoSeat; });
+            Check_cai("new seats from the host clear everybody's pick", bob.SessionSeats_cai().size() == 3 && bob.MySeat_cai() == kNoSeat &&
+                      lmbda_seatOf(cid, bob.MyId_cai()) == kNoSeat && lmbda_seatOf(cid, kHostId) == kNoSeat, "");
+            bob.PickSeat_cai(7);                                   // no such seat: none
+            Check_cai("a seat that does not exist is no seat", bob.MySeat_cai() == kNoSeat, "");
+        }
+
         // 13. The host ends the session.
         host.Leave_cai();
         lmbda_pump(4, lmbda_ended(bob));

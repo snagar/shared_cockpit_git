@@ -20,6 +20,8 @@
 #include "shared/net/SessionHub.h"
 #include "shared/settings/Settings.h"
 
+namespace sc::sync { class SeatSync; }
+
 namespace sc {
 
 // The deck's content, without the window (so it can be drawn and tested on its own).
@@ -35,6 +37,11 @@ public:
     bool TakeLightPressed_cai() { return Take_cai(mLightPressed); }
     bool TakeSizePressed_cai() { return Take_cai(mSizePressed); }
     bool TakeClosePressed_cai() { return Take_cai(mClosePressed); }
+    // The seat row's actions (0.9.6): a seat picked in the list (-1 none, kNoSeat: no seat) and "Back to my seat".
+    int  TakeSeatPick_cai() { const int pick = mSeatPick; mSeatPick = -1; return pick; }
+    bool TakeSeatBack_cai() { return Take_cai(mSeatBack); }
+    // The seats (null: no seat row).
+    void SetSeats_cai(const sync::SeatSync* seats) { mSeats = seats; }
 
     // The deck's compact style (small padding: no empty band at the top). The deck has its own
     // ImGui context, so this does not change the main window.
@@ -65,11 +72,16 @@ private:
     void ui_last_event_cai();
     // Ask for control / Take control.
     void ui_control_buttons_cai();
+    // My seat: a list of the seats (and who sits where), Back to my seat.
+    void ui_seat_row_cai();
 
     net::SessionHub& mHub;
     bool mLightPressed = false;
     bool mSizePressed = false;
     bool mClosePressed = false;
+    int  mSeatPick = -1;
+    bool mSeatBack = false;
+    const sync::SeatSync* mSeats = nullptr;
 };
 
 class FlightDeckWindow : public ImgWindow {
@@ -84,6 +96,8 @@ public:
 
     // Called by the light (shows / hides the main window). Runs from the flight loop.
     void SetToggleMain_cai(std::function<void()> toggle) { mToggleMain = std::move(toggle); }
+    // The seats (the seat row; its buttons act from the flight loop).
+    void SetSeats_cai(sync::SeatSync* seats) { mSeats = seats; mPanel.SetSeats_cai(seats); }
     // From the flight loop: the button actions, growing for questions, applying a new size.
     void Tick_cai();
     // Remembers where the deck is and its size, and saves the settings.
@@ -107,6 +121,7 @@ private:
     settings::Settings&   mSettings;
     FlightDeckPanel       mPanel;
     std::function<void()> mToggleMain;
+    sync::SeatSync*       mSeats = nullptr;
     Size                  mChosen = Size::Small;      // what the user picked
     Size                  mApplied = Size::Small;     // what the window is now
     int                   mScreen[4] = {0, 0, 0, 0};  // the screen bounds last seen (left, top, right, bottom)

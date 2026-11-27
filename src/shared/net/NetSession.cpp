@@ -58,7 +58,7 @@ bool SamePeople_cai(const std::vector<Person>& a, const std::vector<Person>& b)
         return false;
     for (std::size_t i = 0; i < a.size(); ++i)
         if (a[i].id != b[i].id || a[i].name != b[i].name || a[i].role != b[i].role || a[i].pic != b[i].pic ||
-            a[i].master != b[i].master || a[i].flags != b[i].flags)
+            a[i].master != b[i].master || a[i].flags != b[i].flags || a[i].seat != b[i].seat)
             return false;
     return true;
 }
@@ -232,6 +232,10 @@ void NetSession::Close_cai(ByeReason reason)
     mStateIn.reset();
     mLoadIn.reset();
     mPicLoad.reset();
+    if (!mHostSeats.empty())
+        mSeatsChanged = true;                         // back to my own seats
+    mHostSeats.clear();
+    mOwnSeat = kNoSeat;
     mCopilotId = kNoId;
     mCommandsIn.clear();
     mRejections.clear();
@@ -536,6 +540,13 @@ void NetSession::HostOnReceived_cai(Link& link, const Message& message)
                         if (other.step == Link::Step::In && other.person.id != id)
                             Send_cai(other.link, out);
                 }
+            } else if (const auto* choice = std::get_if<MsgSeatChoice>(&message)) {
+                const std::uint8_t seat = choice->seat < mOwnSeats.size() ? choice->seat : kNoSeat;
+                if (link.person.seat != seat) {
+                    link.person.seat = seat;
+                    LOG_INFO("'{}' sits in {}", link.person.name, seat == kNoSeat ? std::string("no seat") : mOwnSeats[seat].name);
+                    HostRebuildPeople_cai(true);
+                }
             } else if (std::get_if<MsgSnapshotRequest>(&message)) {
                 LOG_INFO("'{}' asks for the snapshot again (its aircraft was reloaded)", link.person.name);
                 if (std::find(mSnapshotRequests.begin(), mSnapshotRequests.end(), id) == mSnapshotRequests.end())
@@ -608,6 +619,8 @@ void NetSession::HostAdmit_cai(Link& link, const MsgProfileAck& ack)
         Send_cai(link.link, MsgPause{PicId_cai(), *mPicPaused});
     if (mPicLoad && mRules.shareLoad)
         Send_cai(link.link, MsgLoad{PicId_cai(), *mPicLoad}, true);
+    Send_cai(link.link, MsgSeats{mOwnSeats});
+    link.person.seat = kNoSeat;
     HostRebuildPeople_cai(true);
     HostSendPriority_cai();
     const std::string text = fmt::format("{} joined as {}", link.person.name, RoleName_cai(link.person.role));
@@ -823,6 +836,7 @@ void NetSession::HostRebuildPeople_cai(bool send)
     host.role = Role::Crew;
     host.master = true;
     host.pic = mPic == kHostId;
+    host.seat = mOwnSeat;
     people.push_back(host);
     for (const auto& [id, link] : mLinks) {
         if (link.step != Link::Step::In)
@@ -1006,6 +1020,13 @@ void NetSession::JoinOnReceived_cai(const Message& message)
     } else if (const auto* load = std::get_if<MsgLoad>(&message)) {
         if (load->id != mMyId)
             mLoadIn = load->load;
+    } else if (const auto* seats = std::get_if<MsgSeats>(&message)) {
+        if (seats->seats != mHostSeats) {
+            mHostSeats = seats->seats;
+            mOwnSeat = kNoSeat;
+            mSeatsChanged = true;
+            LOG_INFO("the host's seats: {}", mHostSeats.size());
+        }
     } else if (const auto* copilot = std::get_if<MsgCopilotInputs>(&message)) {
         if (copilot->id != mMyId && mRules.copilotAxes)
             mCopilotIn = CopilotIn{copilot->id, copilot->inputs};
@@ -1621,6 +1642,61 @@ void NetSession::SendLoad_cai(const LoadInfo& load)
     } else {
         Send_cai(mHostLink, MsgLoad{kNoId, load}, true);
     }
+}
+
+// My aircraft's seats; hosting, everybody gets them (and their picks are cleared).
+void NetSession::SetOwnSeats_cai(const std::vector<SeatInfo>& seats)
+{
+    if (seats == mOwnSeats)
+        return;
+    mOwnSeats = seats;
+    if (mOwnSeats.size() > static_cast<std::size_t>(kMaxSeats))
+        mOwnSeats.resize(kMaxSeats);
+    if (!Active_cai() || mIsHost) {
+        mOwnSeat = kNoSeat;
+        mSeatsChanged = true;
+    }
+    if (Active_cai() && mIsHost) {
+        for (auto& [linkId, link] : mLinks)
+            link.person.seat = kNoSeat;
+        HostBroadcast_cai(MsgSeats{mOwnSeats});
+        HostRebuildPeople_cai(true);
+        LOG_INFO("seats sent to everybody: {}", mOwnSeats.size());
+    }
+}
+
+// A joiner: the host's seats; else mine.
+const std::vector<SeatInfo>& NetSession::SessionSeats_cai() const
+{
+    return Active_cai() && !mIsHost ? mHostSeats : mOwnSeats;
+}
+
+// My pick, shown to everybody.
+void NetSession::PickSeat_cai(std::uint8_t seat)
+{
+    if (seat >= SessionSeats_cai().size())
+        seat = kNoSeat;
+    mOwnSeat = seat;
+    if (!Active_cai())
+        return;
+    if (mIsHost)
+        HostRebuildPeople_cai(true);
+    else
+        Send_cai(mHostLink, MsgSeatChoice{kNoId, seat});
+}
+
+// My pick.
+std::uint8_t NetSession::MySeat_cai() const
+{
+    return mOwnSeat;
+}
+
+// True once after the session's seats changed.
+bool NetSession::TakeSeatsChanged_cai()
+{
+    const bool changed = mSeatsChanged;
+    mSeatsChanged = false;
+    return changed;
 }
 
 // The PIC's fuel and payload when they arrived since the last call.

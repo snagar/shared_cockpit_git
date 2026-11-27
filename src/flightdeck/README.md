@@ -22,3 +22,6 @@
 * The size and the position are saved in `shared_cockpit.ini`, section `[flightdeck]`.
 * Window actions asked for while a window draws (open the deck, toggle the main window, resize)
   run from the plugin's flight loop, never inside another window's ImGui frame.
+
+Seat row (0.9.6, Small size): a list of the seats (who sits where) and Back to my seat; the
+buttons act from the flight loop (SeatSync).

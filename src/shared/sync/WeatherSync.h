@@ -6,7 +6,10 @@
 // session's rules say (weather, time); they never send weather back; after a move they write the
 // last weather again. The clock is written only when it is off by more than the tolerance (30 s). The list's order is part of the protocol:
 // a value travels as its place in the list. Datarefs not found or not writable here are
-// skipped and listed. When X-Plane downloads real weather here it may overwrite them.
+// skipped and listed. A joiner's real weather and "use system time" would overwrite them, so
+// while the session shares weather / time they are switched off here and back on when the
+// session ends (0.9.7); checked every 15 s, as X-Plane or the user may switch them on (0.9.8);
+// X-Plane 12 real weather: sim/weather/region/change_mode 7 (0.9.10).
 
 #pragma once
 
@@ -72,6 +75,13 @@ private:
     std::vector<bool>         mHave;
     Clock::time_point         mLastAt;
     XPLMDataRef               mUpdateNow = nullptr;     // sim/weather/region/update_immediately
+    // A joiner: real weather and the system clock off while the host's are followed; back after.
+    void TakeOver_cai(const net::SessionRules& rules);
+    void GiveBack_cai();
+    struct Switch { XPLMDataRef ref = nullptr; int before = 0; bool changed = false; bool warned = false; int count = 0; };
+    Switch                    mRealWeather;             // sim/weather/region/change_mode (XP12) or use_real_weather_bool (XP11)
+    Switch                    mSystemTime;              // sim/time/use_system_time
+    Clock::time_point         mNextTakeOver{};          // a joiner: the next real weather / clock check
 };
 
 } // namespace sc::sync

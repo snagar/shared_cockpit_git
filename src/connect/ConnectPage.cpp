@@ -532,9 +532,10 @@ void ConnectPage::ui_people_cai()
     const ImGuiTableFlags flags = ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_SizingFixedFit;
     if (!ImGui::BeginTable("##people", 6, flags))
         return;
+    const std::vector<net::SeatInfo>& seats = session.SessionSeats_cai();
     ImGui::TableSetupColumn("Prio", ImGuiTableColumnFlags_WidthFixed, 48.0f);
     ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch);
-    ImGui::TableSetupColumn("Seat", ImGuiTableColumnFlags_WidthFixed, 52.0f);
+    ImGui::TableSetupColumn("Seat", ImGuiTableColumnFlags_WidthFixed, 66.0f);
     ImGui::TableSetupColumn("Control", ImGuiTableColumnFlags_WidthFixed, 54.0f);
     ImGui::TableSetupColumn("Ping", ImGuiTableColumnFlags_WidthFixed, 44.0f);
     ImGui::TableSetupColumn("Actions", ImGuiTableColumnFlags_WidthFixed, 132.0f);
@@ -562,6 +563,14 @@ void ConnectPage::ui_people_cai()
             ImGui::TextColored(ui::theme::kTextDim, ICON_FA_EYE " Obs.");
         else
             ImGui::TextUnformatted("Crew");
+        // Where they sit in the cockpit (the host's seats, 0.9.6): a chair, the name in the tooltip.
+        if (p.seat < seats.size()) {
+            ImGui::SameLine(0.0f, 4.0f);
+            ImGui::TextColored(ui::theme::kSavedText, ICON_FA_CHAIR);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("%s sits in the %s (only their own view; pick yours on the Flight deck)", p.name.c_str(),
+                                  seats[p.seat].name.c_str());
+        }
         ImGui::TableNextColumn();
         ImGui::AlignTextToFramePadding();
         if (p.pic)

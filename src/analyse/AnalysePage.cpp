@@ -11,6 +11,7 @@
 #include "imgui_stdlib.h"
 
 #include "Globals.h"
+#include "shared/analysis/VrSeats.h"
 #include "shared/log/Log.h"
 #include "shared/ui/ShareCard.h"
 #include "shared/ui/Widgets.h"
@@ -442,6 +443,27 @@ void AnalysePage::ui_read_cai()
         else
             ImGui::TextColored(ui::theme::kSavedText, ICON_FA_CHECK " %zu files, %zu click areas", data->files.size(),
                                manipulators);
+        // The seats: the vrconfig file's teleport hotspots (read again with the analysis).
+        if (mSeatsFor != mSession.AcfFile_cai() || mSeatsRevision != mSession.Revision_cai()) {
+            mSeatsFor = mSession.AcfFile_cai();
+            mSeatsRevision = mSession.Revision_cai();
+            mSeatNames.clear();
+            for (const analysis::VrSeat& seat : analysis::ReadVrSeats_cai(mSeatsFor))
+                mSeatNames.push_back(seat.name);
+        }
+        ImGui::SameLine();
+        if (mSeatNames.empty())
+            ImGui::TextDisabled(ICON_FA_CHAIR " no seats");
+        else
+            ImGui::TextDisabled(ICON_FA_CHAIR " %zu seats", mSeatNames.size());
+        if (ImGui::IsItemHovered()) {
+            std::string tip = mSeatNames.empty() ? std::string("No seats: the aircraft's vrconfig file has no teleport hotspots.")
+                                                 : std::string("Seats (from the aircraft's vrconfig file):");
+            for (const std::string& name : mSeatNames)
+                tip += "\n  " + name;
+            tip += "\n\nThe crew picks a seat on the Flight deck. New seats: make them with\nthe vrconfig_helper plugin, then Read again.";
+            ImGui::SetTooltip("%s", tip.c_str());
+        }
     }
 }
 

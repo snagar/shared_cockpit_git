@@ -98,6 +98,9 @@ private:
     std::set<std::string>    mFolded[2];       // per view: folded group keys
     std::vector<ViewGroup>   mGroups;
     std::size_t              mBuiltRevision = static_cast<std::size_t>(-1);
+    std::filesystem::path    mSeatsFor;                 // the aircraft (and revision) the seat names were read for
+    std::size_t              mSeatsRevision = 0;
+    std::vector<std::string> mSeatNames;              // its vrconfig hotspots (0.9.6)
     View                     mBuiltView = View::Type;
 
     bool                     mOtherAircraft = false;

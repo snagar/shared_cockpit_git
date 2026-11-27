@@ -11,7 +11,7 @@ systems. Most of what follows comes from that.
 > **The one exception is the opt-in "copilot axes" (section 4b): it puts one copilot's stick and
 > pedals on X-Plane's copilot side - with real risks, read them first.**
 
-This page is for version **0.9.5** (network protocol **9**). Everybody in a session needs the same
+This page is for version **0.9.10** (network protocol **10**). Everybody in a session needs the same
 protocol - the About box shows it.
 
 ---
@@ -22,7 +22,7 @@ protocol - the About box shows it.
 |---|---|
 | **X-Plane** | X-Plane 12. Moving to a far-away PIC (another airport) needs **12.4 or newer** (`XPLMInitFlight`); nearby moves work on any 12. |
 | **Same aircraft** | Everybody loads the **same `.acf`** (same file name). The same version of it is best: a different version is a warning, not a block (controls may be missing). |
-| **Same plugin** | The same Shared Cockpit protocol (0.9.5 = 9). Older versions are refused with a clear message. |
+| **Same plugin** | The same Shared Cockpit protocol (0.9.10 = 10). Older versions are refused with a clear message. |
 | **Analysis** | The host needs a saved analysis of the aircraft (Home, step 1). Joiners use the host's, in memory - their own file is not changed. |
 | **Network** | UDP, port **39100** by default. LAN: nothing to do. Internet: ZeroTier or Tailscale (no router changes), or forward the UDP port on the host's router. |
 | **People** | Up to **4**: the host and 3 joiners. |
@@ -221,5 +221,12 @@ use it. Leave copilot axes off unless both of you want to fly together.
   `shared_cockpit_trace.csv` (10 rows a second while in a session): position, the inputs, the control
   deflections, nosewheel angle, brakes, throttle, RPM, and with Follow how far the aircraft was from
   the PIC's and how late its state was. Send the traces of both X-Planes to compare.
+* **Seats (0.9.6):** the seats are the teleport hotspots of the host's aircraft's vrconfig file
+  (`<aircraft>_vrconfig.txt`); the host sends them to everybody (in memory, no file written). Pick yours
+  on the Flight deck (the seat list); the 3D cockpit view jumps there. "Back to my seat" (button, or the command
+  `shared_cockpit/seat/back_to_my_seat`) puts the view back; `shared_cockpit/seat/next` / `previous`
+  step through them. A seat is only your own view. An aircraft without hotspots has no seats: make
+  them with the vrconfig_helper plugin. **VR:** the plugin does not move a VR view; use X-Plane's own
+  teleport, or leave VR, use Back to my seat, and return.
 * **Plugin log detail:** Home > About > "Plugin log: Normal / Detailed (debug)" (or `[debug]
   log_level=info|debug|default`). Detailed works in Release builds too; saved, applies at once.

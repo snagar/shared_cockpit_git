@@ -130,3 +130,6 @@ Debug: every message sent / received (type, size, link) and every packet in the 
 ## Testing
 `sc_net_test --selftest` runs a host and joiners in one process and checks every rule above (32 checks).
 Two computers: `sc_net_test --host` on one, `sc_net_test --join <ip>` on the other, then the menus.
+
+Protocol 10 (0.9.6; older cannot join): `Seats` (the host's vrconfig hotspots, on admit and when
+they change), `SeatChoice` (a joiner's pick); `Person` carries `seat`.

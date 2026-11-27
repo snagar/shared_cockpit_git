@@ -3,6 +3,7 @@
 #include "flightdeck/FlightDeckWindow.h"
 
 #include <algorithm>
+#include <cfloat>
 #include <chrono>
 
 #include "fmt/format.h"
@@ -11,6 +12,7 @@
 
 #include "shared/log/Log.h"
 #include "shared/ui/Theme.h"
+#include "shared/sync/SeatSync.h"
 #include "shared/ui/Widgets.h"
 #include "shared/util/Utils.h"
 
@@ -188,9 +190,9 @@ int FlightDeckPanel::HeightOf_cai(Size size)
     switch (size) {
         case Size::Minimal: return 36;   // one row: 26 + 2 x 5
         case Size::Line:    return 67;   // two rows
-        case Size::Small:   return 132;
+        case Size::Small:   return 164;   // + the seat row (0.9.6)
     }
-    return 132;
+    return 164;
 }
 
 // Small while a question is open, else the chosen size.
@@ -232,6 +234,10 @@ void FlightDeckWindow::Tick_cai()
     }
     if (mPanel.TakeLightPressed_cai() && mToggleMain)
         mToggleMain();
+    if (const int pick = mPanel.TakeSeatPick_cai(); pick >= 0 && mSeats)
+        mSeats->Pick_cai(static_cast<std::uint8_t>(pick));
+    if (mPanel.TakeSeatBack_cai() && mSeats)
+        mSeats->BackToSeat_cai();
     FollowScreen_cai();
     if (GetVisible() && Shown_cai() != mApplied)
         Apply_cai(Shown_cai());
@@ -367,6 +373,8 @@ void FlightDeckPanel::ui_draw_cai(Size size)
         }
         ImGui::SameLine(ImGui::GetContentRegionMax().x * 0.55f);
         ImGui::TextDisabled("You: %s%s", me ? net::RoleName_cai(me->role) : "-", session.IsHost_cai() ? " (master)" : "");
+        if (mSeats)
+            ui_seat_row_cai();
         ui_control_buttons_cai();
     } else {
         ui::ui_wrapped_text_cai(session.State_cai() == net::SessionState::Idle
@@ -377,6 +385,63 @@ void FlightDeckPanel::ui_draw_cai(Size size)
     ImGui::Separator();
     if (!ui_question_cai())
         ui_last_event_cai();
+}
+
+// My seat: the seat list (who sits where), Back to my seat.
+void FlightDeckPanel::ui_seat_row_cai()
+{
+    const net::NetSession& session = mHub.Session_cai();
+    const std::vector<net::SeatInfo>& seats = mSeats->Seats_cai();
+    const std::uint8_t mine = mSeats->MySeat_cai();
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted(ICON_FA_CHAIR);
+    ImGui::SameLine();
+    if (seats.empty()) {
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextDisabled("No seats in this aircraft");
+        if (ImGui::IsItemHovered())
+            Tooltip_cai("Seats come from the host's aircraft (its vrconfig file).\n"
+                        "The vrconfig_helper plugin can add them.");
+        return;
+    }
+    // Who else sits in a seat (it is only a view: two can share one).
+    auto lmbda_others = [&](std::size_t seat) {
+        std::string others;
+        for (const net::Person& p : session.People_cai())
+            if (p.seat == seat && p.id != session.MyId_cai())
+                others += fmt::format("{}{}", others.empty() ? "" : ", ", p.name);
+        return others;
+    };
+    const float icon = ImGui::GetFontSize() + 8.0f;
+    const float gap = ImGui::GetStyle().ItemSpacing.x;
+    std::string preview = "Pick a seat";
+    if (mine < seats.size()) {
+        const std::string others = lmbda_others(mine);
+        preview = seats[mine].name + (others.empty() ? std::string() : "  · " + others);
+    }
+    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - icon - gap);
+    // The list opens where it fits (above the row when the window is short); it scrolls past that.
+    ImGui::SetNextWindowSizeConstraints(ImVec2(0.0f, 0.0f), ImVec2(FLT_MAX, ImGui::GetIO().DisplaySize.y - 8.0f));
+    if (ImGui::BeginCombo("##seat", preview.c_str(), ImGuiComboFlags_HeightLargest)) {
+        if (ImGui::Selectable("No seat (my own view)", mine == net::kNoSeat))
+            mSeatPick = net::kNoSeat;
+        for (std::size_t i = 0; i < seats.size(); ++i) {
+            const std::string others = lmbda_others(i);
+            const std::string label = fmt::format("{}{}##seat{}", seats[i].name, others.empty() ? "" : "  · " + others, i);
+            if (ImGui::Selectable(label.c_str(), i == mine))
+                mSeatPick = static_cast<int>(i);
+        }
+        ImGui::EndCombo();
+    }
+    if (ImGui::IsItemHovered())
+        Tooltip_cai(fmt::format("{} seats from {}. Your seat is only your view:\nit changes nothing for the others.{}",
+                                seats.size(), mSeats->Source_cai(),
+                                mSeats->InVr_cai() ? "\nIn VR: use X-Plane's teleport to the seat." : "").c_str());
+    ImGui::SameLine();
+    if (ui_icon_button_cai("##seatBack", ICON_FA_UNDO))
+        mSeatBack = true;
+    if (ImGui::IsItemHovered())
+        Tooltip_cai("Back to my seat: its position and direction\n(command shared_cockpit/seat/back_to_my_seat)");
 }
 
 // The status light: a round button.

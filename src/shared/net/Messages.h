@@ -51,6 +51,7 @@ struct Person {
     bool          pic = false;
     std::uint16_t pingMs = 0;
     std::uint8_t  flags = kFlagNone;
+    std::uint8_t  seat = kNoSeat;       // in the host's seats (protocol 10); kNoSeat: none picked
 };
 struct MsgPeople { std::vector<Person> people; };
 
@@ -145,6 +146,17 @@ struct LoadInfo {
     bool operator==(const LoadInfo&) const = default;
 };
 struct MsgLoad { std::uint8_t id = kNoId; LoadInfo load; };
+// A seat: one of the aircraft's vrconfig teleport hotspots (aircraft coordinates, metres; degrees).
+struct SeatInfo {
+    std::string name;
+    bool  sitting = true;               // SITTING (else STANDING)
+    float x = 0.0f, y = 0.0f, z = 0.0f;
+    float psi = 0.0f, the = 0.0f, phi = 0.0f;
+    bool operator==(const SeatInfo&) const = default;
+};
+struct MsgSeats { std::vector<SeatInfo> seats; };
+// A joiner picked a seat (index in the host's seats, kNoSeat: none). To the host: id = kNoId.
+struct MsgSeatChoice { std::uint8_t id = kNoId; std::uint8_t seat = kNoSeat; };
 // The session's rules (host -> everybody, on admit and on a change).
 struct MsgRules { SessionRules rules; };
 
@@ -152,7 +164,7 @@ using Message = std::variant<MsgHello, MsgChallenge, MsgProof, MsgWelcome, MsgRe
                              MsgPeople, MsgControlRequest, MsgControlOffer, MsgControlAnswer, MsgControlChanged,
                              MsgBye, MsgNotice, MsgCommand, MsgReject, MsgValues, MsgCorrection, MsgSnapshot,
                              MsgPriority, MsgPosition, MsgWeather, MsgSnapshotRequest, MsgRules, MsgFlightInputs, MsgPause, MsgCopilotInputs,
-                             MsgFlightState, MsgLoad>;
+                             MsgFlightState, MsgLoad, MsgSeats, MsgSeatChoice>;
 
 // The type of a message.
 MsgType TypeOf_cai(const Message& message);

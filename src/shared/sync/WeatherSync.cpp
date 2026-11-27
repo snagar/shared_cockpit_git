@@ -204,6 +204,7 @@ void WeatherSync::HostTick_cai()
 void WeatherSync::Apply_cai(const std::vector<double>& values, const std::vector<bool>& have, double clockAhead, const char* why)
 {
     const net::SessionRules& rules = mHub.Session_cai().Rules_cai();
+    TakeOver_cai(rules);
     std::vector<double> here(values.size(), 0.0);
     std::vector<double> adjusted = values;
     std::size_t written = 0;
@@ -235,6 +236,67 @@ void WeatherSync::Apply_cai(const std::vector<double>& values, const std::vector
     stats.weatherAt = Clock::now();
 }
 
+// A joiner: real weather and the system clock would overwrite the host's: kept off here for the
+// whole session (checked every 15 s; X-Plane or the user may switch them on again), back after.
+// X-Plane 12: sim/weather/region/change_mode 7 = "Using Real Weather", 0..6 = not real weather
+// (3 = static), then update_immediately (the way Mission-X does it). X-Plane 11: use_real_weather_bool.
+void WeatherSync::TakeOver_cai(const net::SessionRules& rules)
+{
+    struct Off { const char* name; int on; int off; };   // `on`: the value that means "on" (-1: any but 0)
+    auto lmbda_off = [this](Switch& sw, bool wanted, std::initializer_list<Off> names, const char* what) {
+        if (!wanted)
+            return;
+        for (const Off& o : names) {
+            XPLMDataRef ref = XPLMFindDataRef(o.name);
+            if (!ref)
+                continue;
+            const int now = XPLMGetDatai(ref);
+            if (o.on >= 0 ? now != o.on : now == 0)
+                return;                               // off (the first one X-Plane has decides)
+            if (!XPLMCanWriteDataRef(ref)) {
+                if (!sw.warned)
+                    LOG_WARN("{}: {} is {} and X-Plane does not let the plugin change it", what, o.name, now);
+                sw.warned = true;
+                return;
+            }
+            XPLMSetDatai(ref, o.off);
+            if (&sw == &mRealWeather && mUpdateNow && XPLMCanWriteDataRef(mUpdateNow))
+                XPLMSetDatai(mUpdateNow, 1);
+            const int after = XPLMGetDatai(ref);
+            if (!sw.changed)
+                sw = Switch{ref, now, true, sw.warned};
+            if (after == now) {
+                if (!sw.warned)
+                    LOG_WARN("{}: {} {} -> {} was not taken by X-Plane (still {})", what, o.name, now, o.off, after);
+                sw.warned = true;
+            } else {
+                ++sw.count;
+                if (sw.count <= 3 || sw.count % 20 == 0)
+                    LOG_INFO("{}: switched off here while following the host ({} {} -> {}, {} time(s); back when the session ends)",
+                             what, o.name, now, o.off, sw.count);
+            }
+            return;
+        }
+    };
+    lmbda_off(mRealWeather, rules.weather,
+              {{"sim/weather/region/change_mode", 7, 3}, {"sim/weather/use_real_weather_bool", -1, 0}}, "real weather");
+    lmbda_off(mSystemTime, rules.time, {{"sim/time/use_system_time", -1, 0}}, "the system clock");
+}
+
+// Real weather and the system clock back as they were.
+void WeatherSync::GiveBack_cai()
+{
+    for (Switch* sw : {&mRealWeather, &mSystemTime}) {
+        if (sw->changed && sw->ref) {
+            XPLMSetDatai(sw->ref, sw->before);
+            if (sw == &mRealWeather && mUpdateNow && XPLMCanWriteDataRef(mUpdateNow))
+                XPLMSetDatai(mUpdateNow, 1);              // real weather again now
+            LOG_INFO("weather and time: {} back to {}", sw == &mRealWeather ? "real weather" : "the system clock", sw->before);
+        }
+        *sw = Switch{};
+    }
+}
+
 // A joiner: writes the host's newest weather; after a move the last one again.
 void WeatherSync::JoinTick_cai()
 {
@@ -252,6 +314,10 @@ void WeatherSync::JoinTick_cai()
         if (rules.weather || rules.time)
             Apply_cai(mLast, mHave, 0.0, "");
     }
+    if (const Clock::time_point now = Clock::now(); now >= mNextTakeOver) {   // real weather stays off
+        mNextTakeOver = now + std::chrono::seconds(15);
+        TakeOver_cai(rules);
+    }
     if (stats.reapplyWeather) {
         stats.reapplyWeather = false;
         if (!mLast.empty() && (rules.weather || rules.time))
@@ -265,6 +331,7 @@ void WeatherSync::Tick_cai()
     net::NetSession& session = mHub.Session_cai();
     net::PositionStats& stats = mHub.Position_cai();
     if (!session.Active_cai()) {
+        GiveBack_cai();
         if (mStarted)
             LOG_INFO("weather and time: stopped");
         mStarted = false;

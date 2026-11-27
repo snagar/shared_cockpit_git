@@ -15,7 +15,7 @@ namespace sc::info {
 
 // --- The plugin --------------------------------------------------------------------
 inline constexpr std::string_view kVersion      = "0.9";     // change before a release
-inline constexpr std::string_view kBuild        = "5";       // iteration, the zip is shared_cockpit_<version>.<build>.zip
+inline constexpr std::string_view kBuild        = "10";       // iteration, the zip is shared_cockpit_<version>.<build>.zip
 inline constexpr std::string_view kPluginId     = "shared_cockpit";   // must match project() in CMakeLists.txt
 inline constexpr std::string_view kPluginName   = "Shared Cockpit";
 inline constexpr std::string_view kPluginDesc   = "Shares one cockpit between two X-Plane simulators";

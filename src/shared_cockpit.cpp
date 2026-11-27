@@ -34,6 +34,7 @@
 #include "shared/sync/CommandSync.h"
 #include "shared/sync/DatarefSync.h"
 #include "shared/sync/FlightSync.h"
+#include "shared/sync/SeatSync.h"
 #include "shared/sync/FlightTrace.h"
 #include "shared/net/Protocol.h"
 #include "shared/sync/PositionSync.h"
@@ -56,7 +57,8 @@ std::unique_ptr<sc::sync::DatarefSync> gDatarefSync;   // shares the datarefs wh
 std::unique_ptr<sc::sync::PositionSync> gPositionSync; // positions, the move to the PIC
 std::unique_ptr<sc::sync::WeatherSync>  gWeatherSync;  // the host's weather and time
 std::unique_ptr<sc::sync::LoadSync>     gLoadSync;     // the PIC's fuel and payload
-std::unique_ptr<sc::sync::FlightSync>   gFlightSync;   // flying together: the PIC's inputs, pause
+std::unique_ptr<sc::sync::FlightSync>   gFlightSync;
+std::unique_ptr<sc::sync::SeatSync>     gSeatSync;     // seats: the aircraft's vrconfig hotspots, my view   // flying together: the PIC's inputs, pause
 std::unique_ptr<sc::sync::FlightTrace>  gFlightTrace;  // [debug] flight_trace: a CSV of the flight
 XPLMCommandRef                gCmdToggle = nullptr;
 XPLMCommandRef                gCmdToggleDeck = nullptr;
@@ -97,6 +99,7 @@ void OpenFlightDeck_cai()
     ImGuiContext* prevContext = ImGui::GetCurrentContext();
     if (!gDeck) {
         gDeck = std::make_unique<sc::FlightDeckWindow>(gHub, gSettings);
+        gDeck->SetSeats_cai(gSeatSync.get());
         auto lmbda_toggleMain = []() {
             // The light: hide the main window, or show it on the Connect page.
             if (gWindow && gWindow->GetVisible()) {
@@ -148,6 +151,8 @@ float FlightLoop_cai(float, float, int, void*)
         gLoadSync->Tick_cai();
     if (gFlightSync)
         gFlightSync->Tick_cai();
+    if (gSeatSync)
+        gSeatSync->Tick_cai();
     if (gFlightTrace)
         gFlightTrace->Tick_cai();                         // after the inputs were written this frame
     if (gWantOpenDeck) {
@@ -288,6 +293,9 @@ PLUGIN_API int XPluginEnable(void)
     gWeatherSync = std::make_unique<sc::sync::WeatherSync>(gHub, gSettings);
     gLoadSync = std::make_unique<sc::sync::LoadSync>(gHub);
     gFlightSync = std::make_unique<sc::sync::FlightSync>(gHub);
+    gSeatSync = std::make_unique<sc::sync::SeatSync>(gHub);
+    if (gDeck)
+        gDeck->SetSeats_cai(gSeatSync.get());
     gFlightTrace = std::make_unique<sc::sync::FlightTrace>(gHub, sc::Globals::get_cai().pluginFolder, gSettings);
     LOG_INFO("enabled");
     return 1;
@@ -308,6 +316,9 @@ PLUGIN_API void XPluginDisable(void)
     if (gFlightSync)
         gFlightSync->Stop_cai("the plugin was disabled");   // the user's own hardware back
     gFlightSync.reset();
+    if (gDeck)
+        gDeck->SetSeats_cai(nullptr);
+    gSeatSync.reset();
     gFlightTrace.reset();
     gHub.Leave_cai("the plugin was disabled");
     if (gDeck)

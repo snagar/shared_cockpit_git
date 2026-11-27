@@ -245,6 +245,17 @@ public:
     void SendLoad_cai(const LoadInfo& load);
     // The PIC's fuel and payload when they arrived since the last call.
     std::optional<LoadInfo> TakeLoad_cai();
+    // Seats (0.9.6, protocol 10): my aircraft's vrconfig hotspots. Hosting: sent to everybody
+    // when they change (everybody's pick is cleared then).
+    void SetOwnSeats_cai(const std::vector<SeatInfo>& seats);
+    // The seats to pick from: a joiner the host's, else my own.
+    const std::vector<SeatInfo>& SessionSeats_cai() const;
+    // I picked a seat (index in SessionSeats_cai, kNoSeat: none): shown to everybody.
+    void PickSeat_cai(std::uint8_t seat);
+    // My pick (kNoSeat: none).
+    std::uint8_t MySeat_cai() const;
+    // True once after the session's seats changed.
+    bool TakeSeatsChanged_cai();
     // About how long the PIC's packets take to reach me, ms (from the pings).
     double PicDelayMs_cai() const;
     // Copilot axes (session rule): my stick / yoke / pedals as X-Plane's copilot side, to everybody.
@@ -392,6 +403,10 @@ private:
     std::uint32_t              mStateSequence = 0;                  // the PIC: the last state sent
     std::optional<LoadInfo>    mLoadIn;                             // the PIC's fuel and payload, arrived
     std::optional<LoadInfo>    mPicLoad;                            // host: the PIC's last (for new joiners)
+    std::vector<SeatInfo>      mOwnSeats;                           // my aircraft's seats
+    std::vector<SeatInfo>      mHostSeats;                          // a joiner: the host's
+    std::uint8_t               mOwnSeat = kNoSeat;                  // my pick
+    bool                       mSeatsChanged = false;
     std::optional<CopilotIn>   mCopilotIn;                          // the copilot's newest inputs
     std::uint8_t               mCopilotId = kNoId;                  // host: who has the copilot seat
     Clock::time_point          mCopilotAt;                          // host: when that one last sent
