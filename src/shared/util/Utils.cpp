@@ -6,6 +6,8 @@
 #include <cmath>
 #include <cstdio>
 #include <charconv>
+#include <locale>
+#include <sstream>
 #include <ctime>
 #include <fstream>
 #include <iterator>
@@ -154,6 +156,32 @@ std::vector<std::string> Utils::Split_cai(std::string_view text, char separator)
         at = end + 1;
     }
     return parts;
+}
+
+// True when all of `text` is a decimal number (the "C" locale: '.' as the decimal point).
+bool Utils::ParseFloat_cai(std::string_view text, double& value)
+{
+    text = Trim_cai(text);
+    if (text.empty())
+        return false;
+    std::istringstream number{std::string(text)};
+    number.imbue(std::locale::classic());
+    double parsed = 0.0;
+    number >> parsed;
+    if (!number || number.peek() != std::char_traits<char>::eof())
+        return false;
+    value = parsed;
+    return true;
+}
+
+// The same, as a float.
+bool Utils::ParseFloat_cai(std::string_view text, float& value)
+{
+    double parsed = 0.0;
+    if (!ParseFloat_cai(text, parsed))
+        return false;
+    value = static_cast<float>(parsed);
+    return true;
 }
 
 // True when all of `text` is a whole number.

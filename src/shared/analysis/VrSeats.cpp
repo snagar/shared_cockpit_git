@@ -1,7 +1,6 @@
 // shared_cockpit - an aircraft's seats from its vrconfig file (0.9.6)
 #include "shared/analysis/VrSeats.h"
 
-#include <charconv>
 #include <fstream>
 
 #include "shared/log/Log.h"
@@ -26,9 +25,9 @@ std::vector<VrSeat> ReadVrSeats_cai(const fs::path& acfFile)
     if (!in)
         return seats;
     auto lmbda_float = [](const std::vector<std::string>& words, std::size_t at) {
-        float value = 0.0f;                           // from_chars: not the user's locale
-        if (at < words.size())
-            std::from_chars(words[at].data(), words[at].data() + words[at].size(), value);
+        float value = 0.0f;
+        if (at < words.size() && !Utils::ParseFloat_cai(words[at], value))
+            value = 0.0f;
         return value;
     };
     bool inside = false;

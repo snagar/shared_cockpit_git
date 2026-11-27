@@ -11,7 +11,7 @@ systems. Most of what follows comes from that.
 > **The one exception is the opt-in "copilot axes" (section 4b): it puts one copilot's stick and
 > pedals on X-Plane's copilot side - with real risks, read them first.**
 
-This page is for version **0.9.10** (network protocol **10**). Everybody in a session needs the same
+This page is for version **0.9.11** (network protocol **10**). Everybody in a session needs the same
 protocol - the About box shows it.
 
 ---
@@ -22,7 +22,7 @@ protocol - the About box shows it.
 |---|---|
 | **X-Plane** | X-Plane 12. Moving to a far-away PIC (another airport) needs **12.4 or newer** (`XPLMInitFlight`); nearby moves work on any 12. |
 | **Same aircraft** | Everybody loads the **same `.acf`** (same file name). The same version of it is best: a different version is a warning, not a block (controls may be missing). |
-| **Same plugin** | The same Shared Cockpit protocol (0.9.10 = 10). Older versions are refused with a clear message. |
+| **Same plugin** | The same Shared Cockpit protocol (0.9.11 = 10). Older versions are refused with a clear message. |
 | **Analysis** | The host needs a saved analysis of the aircraft (Home, step 1). Joiners use the host's, in memory - their own file is not changed. |
 | **Network** | UDP, port **39100** by default. LAN: nothing to do. Internet: ZeroTier or Tailscale (no router changes), or forward the UDP port on the host's router. |
 | **People** | Up to **4**: the host and 3 joiners. |

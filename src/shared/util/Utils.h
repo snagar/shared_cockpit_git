@@ -53,6 +53,10 @@ public:
     static std::vector<std::string> Split_cai(std::string_view text, char separator);
     // True when all of `text` is a whole number.
     static bool ParseInt_cai(std::string_view text, int& value);
+    // True when all of `text` is a decimal number ("0.42", "-1e3"), always with a '.' whatever the
+    // user's locale. Use it, not std::from_chars, for floats: macOS before 13.3 has no float from_chars.
+    static bool ParseFloat_cai(std::string_view text, double& value);
+    static bool ParseFloat_cai(std::string_view text, float& value);
     // True when `text` contains `word` (lower-case `text` expected).
     static bool Contains_cai(std::string_view text, std::string_view word);
     // "1 control" / "3 controls".
