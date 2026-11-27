@@ -165,6 +165,8 @@ target_link_libraries(loguru PUBLIC Threads::Threads ${CMAKE_DL_LIBS})
 set(SC_CORE_SOURCES
     src/shared/util/Utils.cpp
     src/shared/util/Libraries.cpp
+    src/shared/analysis/VrSeats.cpp
+    src/shared/analysis/VrSeats.h
     src/shared/util/Libraries.h
     src/shared/util/Utils.h
     src/shared/util/StopThread.h
@@ -368,6 +370,8 @@ add_library(${PROJECT_NAME} MODULE
     src/shared/sync/PositionSync.cpp
     src/shared/sync/PositionSync.h
     src/shared/sync/LoadSync.cpp
+    src/shared/sync/SeatSync.cpp
+    src/shared/sync/SeatSync.h
     src/shared/sync/LoadSync.h
     src/shared/sync/WeatherSync.cpp
     src/shared/sync/WeatherSync.h)
