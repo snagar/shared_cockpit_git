@@ -1,4 +1,4 @@
-# Shared Cockpit - build for Linux and Windows, pack the plugin, publish releases.
+# Shared Cockpit - build for Linux, Windows and macOS, pack the plugin, publish releases.
 #
 # When it runs (plain pushes and pull requests do NOT start it):
 #   - a pushed tag with "release", "beta" or "test" in its name; it builds both systems
@@ -22,8 +22,9 @@
 # The folder inside:
 #   shared_cockpit/lin_x64/shared_cockpit.xpl
 #   shared_cockpit/win_x64/shared_cockpit.xpl
+#   shared_cockpit/mac_x64/shared_cockpit.xpl   (Universal 2: Apple Silicon + Intel, macOS 11+, signed ad hoc)
 #   shared_cockpit/sc_manip_types.ini, LICENSE, README.md, COMPATIBILITY.md, build.txt
-name: build - Linux and Windows
+name: build - Linux, Windows and macOS
 
 on:
   push:
@@ -204,9 +205,73 @@ jobs:
           path: _out/${{ env.PLUGIN_NAME }}/
           if-no-files-found: error
 
-  # --- One plugin folder for both systems ----------------------------------------------
+  # --- macOS -------------------------------------------------------------------------
+  # One plugin file for Apple Silicon and Intel (Universal 2, CMakeLists: CMAKE_OSX_ARCHITECTURES),
+  # macOS 11 or newer. Signed ad hoc (no Apple Developer account): users may need to allow it.
+  build-mac:
+    needs: [pre-build]
+    runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        build_type: ${{ fromJSON(needs.pre-build.outputs.build_types) }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Extract XPSDK
+        shell: bash
+        run: |
+          cd libs
+          rm -rf xpsdk SDK sdk xpsdk-master
+          ditto -x -k XPSDK.zip .              # ditto keeps the framework's symlinks
+          if [ ! -d xpsdk ]; then
+            if   [ -d SDK ];          then mv SDK xpsdk
+            elif [ -d sdk ];          then mv sdk xpsdk
+            elif [ -d xpsdk-master ]; then mv xpsdk-master xpsdk
+            fi
+          fi
+          test -d xpsdk/Libraries/Mac/XPLM.framework || { echo "::error::libs/XPSDK.zip: no Libraries/Mac/XPLM.framework under a known folder name"; exit 1; }
+
+      - name: Configure
+        run: >
+          cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+          -DSC_DEPLOY=OFF -DSC_BUILD_TOOLS=ON
+
+      - name: Build
+        run: cmake --build build -j "$(sysctl -n hw.logicalcpu)"
+
+      - name: Network self-test
+        continue-on-error: true            # a failure is a warning: the plugin is still packed and released
+        shell: bash
+        run: |
+          mkdir -p _selftest && cd _selftest
+          ../build/tools/sc_net_test --selftest --quiet
+
+      - name: Check and sign the plugin file
+        shell: bash
+        run: |
+          xpl="build/${PLUGIN_NAME}/mac_x64/${PLUGIN_NAME}.xpl"
+          info=$(lipo -info "$xpl"); echo "$info"
+          if [[ "$info" != *x86_64* || "$info" != *arm64* ]]; then
+            echo "::error::Expected x86_64 and arm64 in one file, got: $info"; exit 1
+          fi
+          otool -L "$xpl"
+          codesign --force --sign - "$xpl"
+          codesign --verify --verbose "$xpl"
+
+      - name: Stage the plugin
+        run: cmake --install build --prefix _out
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: plugin-mac-${{ matrix.build_type }}
+          path: _out/${{ env.PLUGIN_NAME }}/
+          if-no-files-found: error
+
+  # --- One plugin folder for all three systems -----------------------------------------
   package:
-    needs: [pre-build, build-lin, build-win]
+    needs: [pre-build, build-lin, build-win, build-mac]
     runs-on: ubuntu-latest
     permissions:
       contents: write                     # to create the GitHub Release
@@ -228,7 +293,7 @@ jobs:
             [[ -d "download/plugin-lin-${type}" ]] || continue        # only the types built
             out="dist/${type}/${PLUGIN_NAME}"
             mkdir -p "$out"
-            for os in lin win; do
+            for os in lin win mac; do
               cp -R "download/plugin-${os}-${type}/." "$out/"
             done
             cp LICENSE README.md docs/COMPATIBILITY.md "$out/"
