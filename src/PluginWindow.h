@@ -39,6 +39,10 @@ public:
         mHome.SetOpenFlightDeck_cai(open);
         mConnect.SetOpenFlightDeck_cai(std::move(open));
     }
+    // What Home's "Seats" button calls (0.9.31).
+    void SetOpenSeats_cai(std::function<void()> open) { mHome.SetOpenSeats_cai(std::move(open)); }
+    // The seats, for the Connect page's seat list (0.9.25).
+    void SetSeats_cai(sync::SeatSync* seats) { mConnect.SetSeats_cai(seats); mHome.SetSeats_cai(seats); }
     // The user aircraft was (re)loaded.
     void OnAircraftLoaded_cai();
 

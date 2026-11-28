@@ -26,6 +26,8 @@
 #include "shared/net/SessionHub.h"
 #include "shared/settings/Settings.h"
 
+namespace sc::sync { class SeatSync; }
+
 namespace sc::pages {
 
 class ConnectPage {
@@ -36,12 +38,17 @@ public:
     // What the gear button calls (the Session settings page).
     void SetOpenSettings_cai(std::function<void()> open) { mOpenSettings = std::move(open); }
     void SetGoHome_cai(std::function<void()> goHome) { mGoHome = std::move(goHome); }
+    // The seats (0.9.25: a seat list here too, for VR, where the Flight deck is not shown).
+    void SetSeats_cai(sync::SeatSync* seats) { mSeats = seats; }
     // Called by the Flight deck button (empty = the button is disabled).
     void SetOpenFlightDeck_cai(std::function<void()> open) { mOpenFlightDeck = std::move(open); }
     // Called when the page is shown: reads this computer's addresses again.
     void Refresh_cai();
     // Draws the page.
     void ui_draw_cai();
+
+    // Opens the levers list of `id` on the next frame (the master).
+    void OpenLevers_cai(std::uint8_t id) { mLeversFor = id; mOpenLevers = true; }
 
 private:
     enum class Mark { Ok, Warn, Bad, Info };
@@ -65,8 +72,6 @@ private:
     void ui_connecting_cai();
     // In a session: summary, notice box, addresses.
     void ui_in_session_cai();
-    // This computer's addresses (for the host to tell the others).
-    void ui_addresses_cai();
     // The right column: people, control, checks.
     void ui_right_cai(float width, float height);
     // The people table.
@@ -82,6 +87,21 @@ private:
     // A tooltip list: title, then at most 20 names.
     static std::string ListText_cai(const char* title, const std::vector<std::string>& names);
     // The action buttons of one person's row.
+    // My seat: a list and "back to my seat" (0.9.25).
+    void ui_my_seat_cai();
+    // A form's header ("Connect to the host"), red for 5 s after the session ended (0.9.20).
+    void ui_form_header_cai(const char* title);
+    // Notes when the session ends or fails, every frame (the red header, 0.9.21).
+    void WatchEnd_cai();
+    // The recent hosts list, opened from the address field (0.9.21).
+    void ui_recent_list_cai(const ImVec2& pos, float width);
+    // True when the master can change the priority order (two or more joiners).
+    bool CanReorder_cai(const std::vector<net::Person>& people) const;
+    // "Your network info:" with this computer's name and addresses (0.9.17).
+    void ui_network_info_cai();
+    // The levers a Crew member works (0.9.12): the button, and the master's list.
+    void ui_levers_button_cai(const net::Person& p);
+    void ui_levers_popup_cai();
     void ui_person_actions_cai(const net::Person& person);
     // Ask for control / Take control.
     void ui_control_buttons_cai();
@@ -92,7 +112,7 @@ private:
     // A check line with a button at the right end (the tooltip on the text). True when pressed.
     bool ui_check_button_line_cai(Mark mark, const std::string& text, const char* button, const std::string& tooltip = {});
     // One check line with its mark.
-    void ui_check_line_cai(Mark mark, const std::string& text);
+    void ui_check_line_cai(Mark mark, const std::string& text, const std::string& help = {});
     // Status, Leave, Flight deck and the feed.
     void ui_bottom_cai();
     // "Remove <name>?" confirmation.
@@ -119,6 +139,7 @@ private:
     net::SessionHub&     mHub;
     settings::Settings&  mSettings;
     std::function<void()> mGoHome;
+    sync::SeatSync*       mSeats = nullptr;
     std::function<void()> mOpenSettings;
     std::function<void()> mOpenFlightDeck;
 
@@ -129,10 +150,15 @@ private:
     bool         mShowPassword = false;
     std::string  mNotice;
     std::vector<net::LocalAddress> mAddresses;
+    std::string mMachine;                          // this computer's name (0.9.12)
     std::chrono::steady_clock::time_point mStartedAt;
     std::size_t  mSeenFeed = 0;
     int          mScrollFeed = 0;           // frames left to scroll the feed to its end
     std::uint8_t mRemoveId = net::kNoId;
+    std::uint8_t mLeversFor = net::kNoId;        // the levers popup: whose
+    bool         mOpenLevers = false;            // OpenLevers_cai: open it on the next frame
+    bool         mEndedSeen = false;             // the session is ended / failed (last frame)
+    std::chrono::steady_clock::time_point mEndedAt{};   // when (the red form header)
     bool         mAskRemove = false;
 };
 

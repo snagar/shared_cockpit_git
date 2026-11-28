@@ -133,3 +133,7 @@ Two computers: `sc_net_test --host` on one, `sc_net_test --join <ip>` on the oth
 
 Protocol 10 (0.9.6; older cannot join): `Seats` (the host's vrconfig hotspots, on admit and when
 they change), `SeatChoice` (a joiner's pick); `Person` carries `seat`.
+
+Protocol 11 (0.9.12; older cannot join): `Person` carries `levers` (LeverBits the host gave a Crew
+member); `Levers` carries that owner's lever positions (unreliable, like FlightInputs), relayed by
+the host to everybody; control questions wait 25 s.

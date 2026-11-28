@@ -42,6 +42,7 @@ bool Settings::Load_cai(const std::filesystem::path& file, std::string& error)
     FlightDeckSettings deck;
     net::SessionRules rule;
     DebugSettings dbg;
+    AlertSettings alert;
     for (const std::string& raw : Utils::Split_cai(text, '\n')) {
         std::string_view line = Utils::Trim_cai(raw);
         if (const std::size_t comment = line.find(';'); comment != std::string_view::npos)
@@ -57,6 +58,19 @@ bool Settings::Load_cai(const std::filesystem::path& file, std::string& error)
             continue;
         const std::string key = Utils::Lower_cai(Utils::Trim_cai(line.substr(0, equal)));
         const std::string value(Utils::Trim_cai(line.substr(equal + 1)));
+        if (section == "alerts") {
+            int number = 0;
+            const bool on = value != "0" && Utils::Lower_cai(value) != "false" && Utils::Lower_cai(value) != "no";
+            if (key == "pulse")
+                alert.pulse = on;
+            else if (key == "chimes")
+                alert.chimes = on;
+            else if (key == "volume" && Utils::ParseInt_cai(value, number))
+                alert.volume = std::clamp(number, 0, 100);
+            else if (key == "vr_window_follows")
+                alert.vrWindowFollows = on;
+            continue;
+        }
         if (section == "debug") {
             if (key == "flight_trace")
                 dbg.flightTrace = value != "0" && Utils::Lower_cai(value) != "false" && Utils::Lower_cai(value) != "no";
@@ -140,6 +154,7 @@ bool Settings::Load_cai(const std::filesystem::path& file, std::string& error)
     rule.Clamp_cai();
     rules = rule;
     debug = dbg;
+    alerts = alert;
     LOG_INFO("settings read: name '{}', mode {}, {} recent address(es)", connect.name, connect.hostMode ? "host" : "join",
              connect.recent.size());
     return true;
@@ -168,6 +183,8 @@ bool Settings::Save_cai(std::string& error) const
                         rules.weather ? 1 : 0, rules.weatherS, rules.time ? 1 : 0, rules.timeToleranceS,
                         rules.flight == net::FlightMode::Follow ? "follow" : "inputs", rules.smoothingMs,
                         rules.followStrict ? 1 : 0, rules.shareLoad ? 1 : 0, rules.handoverBlendMs, rules.copilotAxes ? 1 : 0);
+    text += fmt::format("\n[alerts]\npulse={}\nchimes={}\nvolume={}\nvr_window_follows={}\n", alerts.pulse ? 1 : 0,
+                        alerts.chimes ? 1 : 0, std::clamp(alerts.volume, 0, 100), alerts.vrWindowFollows ? 1 : 0);
     text += fmt::format("\n[debug]\nflight_trace={}\nlog_level={}\n", debug.flightTrace ? 1 : 0,
                         debug.logLevel == 1 ? "debug" : debug.logLevel == 0 ? "info" : "default");
     if (!Utils::WriteFileSafely_cai(mFile, text, error)) {

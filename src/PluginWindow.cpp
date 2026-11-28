@@ -1,6 +1,7 @@
 // shared_cockpit - the plugin's main window
 
 #include "PluginWindow.h"
+#include "shared/ui/Clipboard.h"
 
 #include <string>
 
@@ -19,6 +20,7 @@ PluginWindow::PluginWindow(analysis::Session& session, net::SessionHub& hub, set
       mConnect(session, hub, settings),
       mSessionSettings(hub, settings)
 {
+    ui::InstallClipboard_cai();                     // Linux: Ctrl+C / Ctrl+V reach the system clipboard (0.9.23)
     SetWindowTitle(std::string(info::kPluginName));
     SetWindowResizingLimits(info::kWindowMinWidth, info::kWindowMinHeight, info::kWindowMaxWidth, info::kWindowMaxHeight);
     auto lmbda_goHome    = [this]() { ShowPage_cai(Page::Home); };

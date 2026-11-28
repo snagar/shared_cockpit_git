@@ -299,6 +299,11 @@ add_library(imgui STATIC
     "${IMGUI_DIR}/imgui_widgets.cpp"
     "${IMGUI_DIR}/misc/cpp/imgui_stdlib.cpp")
 target_include_directories(imgui SYSTEM PUBLIC "${IMGUI_DIR}" "${IMGUI_DIR}/misc/cpp")
+if(APPLE)
+    # Copy to the macOS clipboard (0.9.19; ImgWindow's README): ImGui's own macOS clipboard code.
+    target_compile_definitions(imgui PUBLIC IMGUI_ENABLE_OSX_DEFAULT_CLIPBOARD_FUNCTIONS)
+    target_link_libraries(imgui PUBLIC "-framework ApplicationServices")
+endif()
 
 # --- ImgWindow (static) -----------------------------------------------------------
 add_library(imgwindow STATIC "${IMGWINDOW_DIR}/ImgWindow.cpp" "${IMGWINDOW_DIR}/ImgFontAtlas.cpp")
@@ -349,6 +354,14 @@ add_library(${PROJECT_NAME} MODULE
     src/shared/ui/Fonts.h
     src/shared/ui/Theme.h
     src/shared/ui/Widgets.cpp
+    src/shared/ui/Clipboard.cpp
+    src/shared/ui/Clipboard.h
+    src/shared/ui/Links.cpp
+    src/shared/ui/Links.h
+    src/shared/ui/SeatRow.cpp
+    src/shared/ui/SeatRow.h
+    src/seats/SeatsWindow.cpp
+    src/seats/SeatsWindow.h
     src/shared/ui/Widgets.h
     src/shared/ui/ShareCard.cpp
     src/shared/ui/ShareCard.h
@@ -371,6 +384,8 @@ add_library(${PROJECT_NAME} MODULE
     src/shared/sync/PositionSync.h
     src/shared/sync/LoadSync.cpp
     src/shared/sync/SeatSync.cpp
+    src/shared/sync/Chimes.cpp
+    src/shared/sync/Chimes.h
     src/shared/sync/SeatSync.h
     src/shared/sync/LoadSync.h
     src/shared/sync/WeatherSync.cpp
@@ -383,6 +398,10 @@ else()
     target_compile_options(${PROJECT_NAME} PRIVATE -Wall -Wextra -Wshadow)
 endif()
 target_link_libraries(${PROJECT_NAME} PRIVATE sc_core imgwindow fonts)
+if(WIN32)
+    # Links.cpp: ShellExecute (the Donate button opens the browser).
+    target_link_libraries(${PROJECT_NAME} PRIVATE shell32)
+endif()
 
 if(SC_PLATFORM_DIR STREQUAL "lin_x64")
     # Static C++ runtime; export only the five X-Plane entry points.

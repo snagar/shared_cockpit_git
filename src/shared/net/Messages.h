@@ -52,6 +52,7 @@ struct Person {
     std::uint16_t pingMs = 0;
     std::uint8_t  flags = kFlagNone;
     std::uint8_t  seat = kNoSeat;       // in the host's seats (protocol 10); kNoSeat: none picked
+    std::uint16_t levers = 0;           // LeverBits this Crew member works (protocol 11)
 };
 struct MsgPeople { std::vector<Person> people; };
 
@@ -114,6 +115,8 @@ struct FlightInputs {
 };
 // From the PIC (to the host: id = kNoId; from the host: whose).
 struct MsgFlightInputs { std::uint8_t id = kNoId; std::uint32_t sequence = 0; FlightInputs inputs; };
+// A Crew member's own levers (Person::levers; only those fields count). To the host: id = kNoId.
+struct MsgLevers { std::uint8_t id = kNoId; std::uint16_t levers = 0; FlightInputs inputs; };
 // The copilot's stick / yoke / pedals (session rule copilotAxes): X-Plane's copilot side, -1..1.
 struct CopilotInputs {
     float pitch = 0.0f, roll = 0.0f, heading = 0.0f;
@@ -164,7 +167,11 @@ using Message = std::variant<MsgHello, MsgChallenge, MsgProof, MsgWelcome, MsgRe
                              MsgPeople, MsgControlRequest, MsgControlOffer, MsgControlAnswer, MsgControlChanged,
                              MsgBye, MsgNotice, MsgCommand, MsgReject, MsgValues, MsgCorrection, MsgSnapshot,
                              MsgPriority, MsgPosition, MsgWeather, MsgSnapshotRequest, MsgRules, MsgFlightInputs, MsgPause, MsgCopilotInputs,
-                             MsgFlightState, MsgLoad, MsgSeats, MsgSeatChoice>;
+                             MsgFlightState, MsgLoad, MsgSeats, MsgSeatChoice, MsgLevers>;
+
+// A lever's name ("flaps"), and a set of them ("throttle and flaps").
+const char* LeverName_cai(std::uint16_t bit);
+std::string LeverNames_cai(std::uint16_t levers);
 
 // The type of a message.
 MsgType TypeOf_cai(const Message& message);

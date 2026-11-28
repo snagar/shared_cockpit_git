@@ -15,6 +15,8 @@
 #include "shared/ui/ShareCard.h"
 #include "shared/ui/Widgets.h"
 #include "shared/util/Libraries.h"
+#include "shared/sync/SeatSync.h"
+#include "shared/ui/SeatRow.h"
 #include "shared/util/Utils.h"
 #include "XPLMDefs.h"
 #include "shared/xp/XPlane.h"
@@ -48,6 +50,8 @@ HomePage::HomePage(analysis::Session& session, net::SessionHub& hub, settings::S
 // Points the session at the loaded aircraft when it has no unsaved changes.
 void HomePage::Refresh_cai()
 {
+    mAddresses = net::LocalAddresses_cai();
+    mMachine = net::MachineName_cai();
     if (mSession.Dirty_cai() || mSession.Scanning_cai())
         return;
     const auto loaded = xp::GetUserAircraft_cai();
@@ -141,6 +145,17 @@ void HomePage::ui_draw_cai()
         if (ui_step_button_cai(3, "Flight deck (2D): fly with a small window", false, inSession && !vr, !vr, deckStatus,
                                vr ? ui::theme::kChangedText : ui::theme::kTextDim) && mOpenFlightDeck)
             mOpenFlightDeck();
+        ui_seats_button_cai();
+        // Donate, at the bottom of the steps (0.9.23).
+        const float donateH = 36.0f;
+        const float bottom = ImGui::GetWindowContentRegionMax().y - donateH;
+        if (ImGui::GetCursorPosY() < bottom)
+            ImGui::SetCursorPosY(bottom);
+        ui::ui_donate_button_cai("home", ImVec2(140.0f, donateH));
+        ImGui::SameLine();
+        ImGui::AlignTextToFramePadding();
+        ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (donateH - ImGui::GetFrameHeight()) * 0.5f);
+        ImGui::TextDisabled("Free to use - thank you!");
     }
     ImGui::EndChild();
     ImGui::SameLine();
@@ -151,6 +166,20 @@ void HomePage::ui_draw_cai()
         mAskAbout = false;
     }
     ui_popup_about_cai();
+}
+
+// "Seats": the small Seats window for changing seats (also alone, also in VR); the main window hides.
+void HomePage::ui_seats_button_cai()
+{
+    const std::size_t count = mSeats ? mSeats->Seats_cai().size() : 0;
+    std::string status = count == 0 ? std::string("No seats in this aircraft (vrconfig_helper can add them).")
+                                    : fmt::format("Jump to one of {} seats in a small window (hides this one).", count);
+    if (mSeats && count > 0 && mSeats->MySeat_cai() < count)
+        status = fmt::format("You sit in the {}. Opens a small window (hides this one).", mSeats->Seats_cai()[mSeats->MySeat_cai()].name);
+    const bool pressed = ui_step_button_cai(4, "Seats: pick where you sit", false, false, mSeats != nullptr,
+                                            status, ui::theme::kTextDim);
+    if (pressed && mOpenSeats)
+        mOpenSeats();
 }
 
 // The right column: aircraft, shareability, session.
@@ -213,6 +242,8 @@ void HomePage::ui_popup_about_cai()
                         static_cast<unsigned>(net::kProtocolVersion));
     ImGui::TextDisabled("Everybody in a session needs the same protocol.");
     ImGui::Spacing();
+    ImGui::Separator();                             // the setup options, between two lines
+    ImGui::Spacing();
     // The flight trace (for testing): saved in [debug], applies at once.
     bool trace = mSettings.debug.flightTrace;
     if (ImGui::Checkbox("Write a flight trace (for testing)", &trace)) {
@@ -221,15 +252,10 @@ void HomePage::ui_popup_about_cai()
         mSettings.Save_cai(error);
         LOG_INFO("flight trace: switched {} on the About box", trace ? "on" : "off");
     }
-    if (ImGui::IsItemHovered()) {
-        ImGui::BeginTooltip();
-        ImGui::PushTextWrapPos(ImGui::GetFontSize() * 30.0f);
-        ImGui::TextUnformatted("While a session runs, 10 rows a second of position, inputs, control deflections, brakes, "
-                               "throttle, RPM and - with Follow - how far this aircraft is from the PIC's. Send the files of "
-                               "every X-Plane to compare them. A new session starts a new file (the old one is kept as .1.csv).");
-        ImGui::PopTextWrapPos();
-        ImGui::EndTooltip();
-    }
+    ImGui::SameLine();                              // a (?) marker: clickable in VR (0.9.26)
+    ui::ui_help_marker_cai("While a session runs, 10 rows a second of position, inputs, control deflections, brakes, "
+                           "throttle, RPM and - with Follow - how far this aircraft is from the PIC's. Send the files of "
+                           "every X-Plane to compare them. A new session starts a new file (the old one is kept as .1.csv).");
     {
         const net::FlightStats& flight = mHub.Flight_cai();
         const std::string state = !trace ? std::string("off")
@@ -255,19 +281,24 @@ void HomePage::ui_popup_about_cai()
             mSettings.Save_cai(error);
             LOG_INFO("log level: {} (About box)", choice == 1 ? "debug" : "info");
         }
-        if (ImGui::IsItemHovered()) {
-            ImGui::BeginTooltip();
-            ImGui::TextUnformatted("Detailed adds window, page and network details to the plugin log (larger log). "
-                                   "Saved; applies at once.");
-            ImGui::EndTooltip();
-        }
+        ImGui::SameLine();
+        ui::ui_help_marker_cai("Detailed adds window, page and network details to the plugin log (larger log). "
+                               "Saved; applies at once.");
     }
+    ImGui::Spacing();
+    ImGui::Separator();
     ImGui::Spacing();
     ImGui::TextUnformatted(fmt::format("Designed by {}", info::kDesignedBy).c_str());
     ImGui::TextUnformatted(fmt::format("Coded by {}", info::kCodedBy).c_str());
     // ImGui::TextUnformatted(fmt::format("License: {}", info::kLicense).c_str());
     ImGui::Spacing();
-    ui::ui_wrapped_text_cai(std::string(info::kIconCredit), &ui::theme::kTextDim);
+    ui::ui_donate_button_cai("about", ImVec2(140.0f, 0.0f));     // 0.9.23
+    ImGui::SameLine();
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextDisabled("Shared Cockpit is free. If you enjoy it, a donation helps.");
+    ImGui::Spacing();
+    // This computer: name and addresses, to tell the others (0.9.12).
+    ui::ui_my_addresses_cai(mAddresses, mMachine);
     ImGui::Spacing();
     // The libraries we build with (versions from their headers).
     if (ImGui::CollapsingHeader("Libraries")) {

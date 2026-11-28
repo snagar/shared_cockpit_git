@@ -3,6 +3,8 @@
 #include "connect/ConnectPage.h"
 
 #include <algorithm>
+#include <cfloat>
+#include <bit>
 
 #include "fmt/format.h"
 #include "IconsFontAwesome5.h"
@@ -12,6 +14,8 @@
 #include "SharedInfo.h"
 #include "shared/analysis/Analysis.h"
 #include "shared/log/Log.h"
+#include "shared/sync/SeatSync.h"
+#include "shared/ui/SeatRow.h"
 #include "shared/ui/Widgets.h"
 #include "shared/util/Utils.h"
 #include "shared/xp/XPlane.h"
@@ -24,7 +28,7 @@ constexpr float       kLeftWidth    = 350.0f;
 constexpr float       kButtonHeight = 40.0f;       // large targets for VR controllers
 constexpr float       kModeHeight   = 34.0f;       // the Host | Join switch
 constexpr float       kRowButtonH   = 24.0f;
-constexpr float       kLabelWidth   = 110.0f;
+constexpr float       kLabelWidth   = 124.0f;
 constexpr float       kFeedLines    = 2.0f;
 constexpr float       kFeedPadY     = 4.0f;
 constexpr const char* kPopupRemove  = "Remove from the session?";
@@ -50,11 +54,15 @@ ImVec4 StateColor_cai(net::SessionState state)
     return ui::theme::kButtonOff;
 }
 
-// A label in front of an input, aligned with the others.
-void ui_label_cai(const char* text)
+// A label in front of an input, aligned with the others; `help`: a (?) after it (0.9.28).
+void ui_label_cai(const char* text, const char* help = nullptr)
 {
     ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted(text);
+    if (help) {
+        ImGui::SameLine(0.0f, 4.0f);
+        ui::ui_help_marker_cai(help);
+    }
     ImGui::SameLine(kLabelWidth);
 }
 
@@ -112,6 +120,7 @@ ConnectPage::ConnectPage(analysis::Session& analysis, net::SessionHub& hub, sett
 void ConnectPage::Refresh_cai()
 {
     mAddresses = net::LocalAddresses_cai();
+    mMachine = net::MachineName_cai();
 }
 
 // ======================================================================================
@@ -121,7 +130,9 @@ void ConnectPage::Refresh_cai()
 // Draws the page.
 void ConnectPage::ui_draw_cai()
 {
+    WatchEnd_cai();
     ui_top_bar_cai();
+    ui_network_info_cai();                          // under the top bar in every state: it never moves (0.9.19)
     ui_questions_cai();
     ImGui::Separator();
     const ImGuiStyle& style = ImGui::GetStyle();
@@ -187,11 +198,11 @@ void ConnectPage::ui_questions_cai()
                                              left);
         ImGui::PushID(q.fromId);
         const float buttonsW = 2.0f * 90.0f + ImGui::GetStyle().ItemSpacing.x;
-        ui::ui_status_strip_cai(text, ui::theme::kChanged, ui::theme::kTextOnColor,
+        ui::ui_status_strip_cai(text, ui::ui_pulse_color_cai(ui::theme::kChanged), ui::theme::kTextOnColor,
                                 ImGui::GetContentRegionAvail().x - buttonsW - ImGui::GetStyle().ItemSpacing.x, 34.0f);
         ImGui::SameLine();
         std::string why;
-        if (ui::ui_color_button_cai(ICON_FA_CHECK " Yes", ImVec2(90.0f, 34.0f), ui::theme::kSaved))
+        if (ui::ui_color_button_cai(ICON_FA_CHECK " Yes", ImVec2(90.0f, 34.0f), ui::ui_pulse_color_cai(ui::theme::kSaved)))
             Report_cai(session.AnswerControl_cai(q.fromId, true, why), why);
         ImGui::SameLine();
         if (ui::ui_color_button_cai(ICON_FA_TIMES " No", ImVec2(90.0f, 34.0f), ui::theme::kError))
@@ -251,14 +262,7 @@ void ConnectPage::ui_left_cai(float width, float height)
         case net::SessionState::Lost:
             ui_name_cai();
             ui_mode_cai();
-            if (session.State_cai() != net::SessionState::Idle) {
-                ui::ui_status_strip_cai(fmt::format(ICON_FA_EXCLAMATION_TRIANGLE "  {}",
-                                                    session.State_cai() == net::SessionState::Lost
-                                                        ? "Session ended: " + session.FailText_cai()
-                                                        : session.FailText_cai()),
-                                        ui::theme::kError, ui::theme::kTextOnColor);
-                ImGui::Spacing();
-            }
+            // Failed / Lost: the red status bar at the bottom says why (0.9.18: no second strip here).
             if (mAction == Action::Host)
                 ui_host_form_cai();
             else if (mAction == Action::Join)
@@ -270,6 +274,65 @@ void ConnectPage::ui_left_cai(float width, float height)
             break;
     }
     ImGui::EndChild();
+}
+
+// The top row: "Your network info:", the purple box (a click copies a value), Refresh, help.
+void ConnectPage::ui_network_info_cai()
+{
+    ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 4.0f);  // room for the box's top line
+    ImGui::TextDisabled("Your network info:");
+    const std::string help = fmt::format(
+        "Tell the others your name or address. Click either to copy it.\n\n"
+        "On a home network (LAN) they join with the LAN address, or often with the name. With ZeroTier or "
+        "Tailscale, use that address. Over the internet without them: forward UDP port {} on your router and "
+        "give your public address.",
+        mHub.Session_cai().HostSettings_cai().port);
+    ImGui::SameLine();
+    ImGui::SetCursorPosY(ImGui::GetCursorPosY() - 4.0f);  // the box's text on the label's line
+    const float rowY = ImGui::GetCursorPosY();
+    if (ui::ui_my_addresses_cai(mAddresses, mMachine, help.c_str(), true))
+        Refresh_cai();
+    // Donate, small, under the analysis chip (0.9.23); left out when the row is too narrow.
+    const float donateW = 96.0f;
+    const float donateX = ImGui::GetContentRegionMax().x - 30.0f - donateW;
+    const float afterRow = ImGui::GetCursorPosY();
+    ImGui::SameLine();
+    if (ImGui::GetCursorPosX() + 12.0f < donateX) {
+        ImGui::SetCursorPos(ImVec2(donateX, rowY));
+        ui::ui_donate_button_cai("connect", ImVec2(donateW, 0.0f), true);
+    }
+    ImGui::SetCursorPosY(std::max(afterRow, ImGui::GetCursorPosY()));
+    ImGui::Dummy(ImVec2(0.0f, 0.0f));
+}
+
+// Every frame: notes the moment the session ends or fails (0.9.21: also while no form is shown,
+// so the red header comes back after each kick).
+void ConnectPage::WatchEnd_cai()
+{
+    const net::SessionState state = mHub.Session_cai().State_cai();
+    const bool ended = state == net::SessionState::Lost || state == net::SessionState::Failed;
+    if (ended && !mEndedSeen)
+        mEndedAt = std::chrono::steady_clock::now();
+    mEndedSeen = ended;
+}
+
+// A form's header; red with a warning triangle for 5 s after a session ended or failed (0.9.20),
+// or until Host / Connect again is pressed.
+void ConnectPage::ui_form_header_cai(const char* title)
+{
+    const bool alert = mEndedSeen && std::chrono::steady_clock::now() - mEndedAt < std::chrono::seconds(5);
+    if (!alert) {
+        ImGui::SeparatorText(title);
+        return;
+    }
+    ImGui::TextColored(ui::theme::kWarnYellow, ICON_FA_EXCLAMATION_TRIANGLE);
+    ImGui::SameLine();
+    ImGui::PushStyleColor(ImGuiCol_Text, ui::theme::kErrorText);
+    ImGui::PushStyleColor(ImGuiCol_Separator, ui::theme::kError);
+    ImGui::PushStyleVar(ImGuiStyleVar_SeparatorTextBorderSize, 2.0f);
+    ImGui::SeparatorText(title);
+    ImGui::PopStyleVar();
+    ImGui::PopStyleColor(2);
 }
 
 // Name input.
@@ -317,13 +380,40 @@ void ConnectPage::ui_mode_cai()
     }
 }
 
+// The recent hosts under the address field (0.9.21: a list instead of a row of buttons that got cut).
+void ConnectPage::ui_recent_list_cai(const ImVec2& pos, float width)
+{
+    ImGui::SetNextWindowPos(pos);
+    ImGui::SetNextWindowSizeConstraints(ImVec2(width, 0.0f), ImVec2(width, 400.0f));
+    if (!ImGui::BeginPopup("##recentList"))
+        return;
+    for (std::size_t i = 0; i < mSettings.connect.recent.size(); ++i) {
+        const std::string& address = mSettings.connect.recent[i];
+        ImGui::PushID(static_cast<int>(i));
+        if (ImGui::Selectable(address.c_str(), address == mJoinAddress, ImGuiSelectableFlags_None, ImVec2(0.0f, kRowButtonH)))
+            mJoinAddress = address;
+        ImGui::PopID();
+    }
+    ImGui::EndPopup();
+}
+
 // The join form.
 void ConnectPage::ui_join_form_cai()
 {
-    ImGui::SeparatorText("Connect to the host");
+    ui_form_header_cai("Connect to the host");
     ui_label_cai("Host address");
-    ImGui::SetNextItemWidth(-1.0f);
+    const bool hasRecent = !mSettings.connect.recent.empty();
+    ImGui::SetNextItemWidth(hasRecent ? ImGui::GetContentRegionAvail().x - 40.0f : -1.0f);
     ImGui::InputTextWithHint("##address", "IP or name, e.g. 192.168.1.20", &mJoinAddress);
+    if (hasRecent) {
+        const ImVec2 fieldMin = ImGui::GetItemRectMin();
+        ImGui::SameLine();
+        if (ImGui::Button(ICON_FA_CHEVRON_DOWN "##recent", ImVec2(32.0f, 0.0f)))
+            ImGui::OpenPopup("##recentList");
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Recent hosts");
+        ui_recent_list_cai(ImVec2(fieldMin.x, ImGui::GetItemRectMax().y), ImGui::GetItemRectMax().x - fieldMin.x);
+    }
     ui_label_cai("Port");
     if (ui_port_input_cai("##joinport", mSettings.connect.joinPort))
         SaveSettings_cai();
@@ -336,22 +426,6 @@ void ConnectPage::ui_join_form_cai()
     ImGui::SameLine();
     if (ImGui::Button(mShowPassword ? ICON_FA_EYE_SLASH "##showjoin" : ICON_FA_EYE "##showjoin", ImVec2(32.0f, 0.0f)))
         mShowPassword = !mShowPassword;
-    if (!mSettings.connect.recent.empty()) {
-        ImGui::AlignTextToFramePadding();
-        ImGui::TextDisabled("Recent:");
-        for (std::size_t i = 0; i < mSettings.connect.recent.size(); ++i) {
-            const std::string& address = mSettings.connect.recent[i];
-            const float w = ImGui::CalcTextSize(address.c_str()).x + ImGui::GetStyle().FramePadding.x * 2.0f;
-            if (ImGui::GetContentRegionAvail().x < w + ImGui::GetStyle().ItemSpacing.x)
-                ImGui::NewLine();
-            else
-                ImGui::SameLine();
-            ImGui::PushID(static_cast<int>(i));
-            if (ImGui::SmallButton(address.c_str()))
-                mJoinAddress = address;
-            ImGui::PopID();
-        }
-    }
     std::string why;
     const bool can = CanJoin_cai(why);
     // "##connect": the same ID for both texts.
@@ -369,7 +443,7 @@ void ConnectPage::ui_join_form_cai()
 // The host form.
 void ConnectPage::ui_host_form_cai()
 {
-    ImGui::SeparatorText("Host setup");
+    ui_form_header_cai("Host setup");
     ui_label_cai("UDP port");
     if (ui_port_input_cai("##hostport", mSettings.connect.hostPort))
         SaveSettings_cai();
@@ -406,8 +480,6 @@ void ConnectPage::ui_host_form_cai()
         DoHost_cai();
     if (!can)
         ui::ui_wrapped_text_cai(why, &ui::theme::kChangedText);
-    else
-        ui::ui_wrapped_text_cai("Your addresses show once hosting starts.", &ui::theme::kTextDim);
 }
 
 // Connecting: progress and Cancel.
@@ -428,6 +500,16 @@ void ConnectPage::ui_connecting_cai()
         mHub.Leave_cai("cancelled");
 }
 
+// My seat: the aircraft's seats and "back to my seat"; in VR the view slides there (0.9.25).
+void ConnectPage::ui_my_seat_cai()
+{
+    if (!mSeats)
+        return;
+    ui_label_cai("My seat", ui::SeatRowHelp_cai());
+    if (ui::ui_seat_row_cai(*mSeats, mSettings.alerts))
+        SaveSettings_cai();
+}
+
 // In a session: summary, notices, addresses.
 void ConnectPage::ui_in_session_cai()
 {
@@ -440,7 +522,8 @@ void ConnectPage::ui_in_session_cai()
                                             host.password.empty() ? "none" : "set", host.maxPeople),
                                 &ui::theme::kTextDim);
         // Can change while hosting: e.g. the first joiner as crew, everybody after as observers.
-        ui_label_cai("Joiners start");
+        ui_label_cai("Joiners start", "For the people who join from now on. The people already in keep their role "
+                                      "(change it in the people list).");
         ImGui::SetNextItemWidth(-1.0f);
         static constexpr const char* kStartItems[] = {"as Crew (automatic)", "as Observer (I assign seats)"};
         int start = host.joinersStartAs == net::Role::Observer ? 1 : 0;
@@ -451,9 +534,7 @@ void ConnectPage::ui_in_session_cai()
             mSettings.connect.joinersObserve = start == 1;
             SaveSettings_cai();
         }
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("For the people who join from now on. The people already in keep their seats\n"
-                              "(change them in the people list).");
+
     } else {
         const net::Person* me = session.Find_cai(session.MyId_cai());
         ui::ui_wrapped_text_cai(fmt::format("{}'s session at {}:{} - your seat: {}", session.NameOf_cai(net::kHostId),
@@ -461,6 +542,7 @@ void ConnectPage::ui_in_session_cai()
                                             me ? net::RoleName_cai(me->role) : "-"),
                                 &ui::theme::kTextDim);
     }
+    ui_my_seat_cai();
     ImGui::Spacing();
     ImGui::SeparatorText("Message to everybody");
     ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - 80.0f);
@@ -473,37 +555,10 @@ void ConnectPage::ui_in_session_cai()
         mNotice.clear();
     }
     ImGui::Spacing();
-    if (session.IsHost_cai())
-        ui_addresses_cai();
-    else
+    if (!session.IsHost_cai())
         ui::ui_wrapped_text_cai("Closing this window keeps you in the session. Leave is at the bottom.", &ui::theme::kTextDim);
 }
 
-// This computer's addresses.
-void ConnectPage::ui_addresses_cai()
-{
-    ImGui::SeparatorText("Your addresses (tell the others)");
-    if (mAddresses.empty()) {
-        ImGui::TextDisabled("No network address found.");
-    } else {
-        for (const net::LocalAddress& a : mAddresses) {
-            ImGui::TextUnformatted(fmt::format("{:<15}", a.ip).c_str());
-            ImGui::SameLine();
-            ImGui::TextDisabled("%s", a.kind.c_str());
-            if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("%s", a.adapter.c_str());
-        }
-    }
-    ui::ui_wrapped_text_cai(fmt::format("Over the internet without ZeroTier / Tailscale: forward UDP port {} on your "
-                                        "router and give your public address.",
-                                        mHub.Session_cai().HostSettings_cai().port),
-                            &ui::theme::kTextDim);
-    if (ImGui::SmallButton(ICON_FA_REDO " Refresh addresses"))
-        Refresh_cai();
-    if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Looks up this computer's network addresses again - after starting ZeroTier or\n"
-                          "Tailscale, or changing networks. The session itself is not touched.");
-}
 
 // The right column.
 void ConnectPage::ui_right_cai(float width, float height)
@@ -524,7 +579,14 @@ void ConnectPage::ui_people_cai()
     const net::NetSession& session = mHub.Session_cai();
     const std::vector<net::Person>& people = session.People_cai();
     const int max = session.IsHost_cai() ? session.HostSettings_cai().maxPeople : net::kMaxPeople;
-    ImGui::SeparatorText(session.Active_cai() ? fmt::format("People  {} of {}", people.size(), max).c_str() : "People");
+    ui::ui_separator_help_cai(session.Active_cai() ? fmt::format("People  {} of {}", people.size(), max).c_str() : "People",
+        "Prio: who wins when two people move the same control within the conflict time: the host, then the PIC, then "
+        "this order (the host changes it with the arrows once two or more have joined).\n"
+        "Name: yours is in colour; the crown is the master (the host: assigns roles, seats and levers, can take control). "
+        "A triangle is a warning.\n"
+        "Seat: Crew works the shared controls, an Observer only watches; a chair: they sit in one of the seats (only their view).\n"
+        "Control: PIC = pilot in command, who flies. For Crew, the levers button: the levers the host gave them.\n"
+        "Actions: Offer control (the PIC), make Observer / Crew and Remove (the host).");
     if (!session.Active_cai() || people.empty()) {
         ImGui::TextDisabled("Nobody yet: host a session or join one.");
         return;
@@ -533,10 +595,10 @@ void ConnectPage::ui_people_cai()
     if (!ImGui::BeginTable("##people", 6, flags))
         return;
     const std::vector<net::SeatInfo>& seats = session.SessionSeats_cai();
-    ImGui::TableSetupColumn("Prio", ImGuiTableColumnFlags_WidthFixed, 48.0f);
+    ImGui::TableSetupColumn("Prio", ImGuiTableColumnFlags_WidthFixed, CanReorder_cai(people) ? 60.0f : 34.0f);
     ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch);
     ImGui::TableSetupColumn("Seat", ImGuiTableColumnFlags_WidthFixed, 66.0f);
-    ImGui::TableSetupColumn("Control", ImGuiTableColumnFlags_WidthFixed, 54.0f);
+    ImGui::TableSetupColumn("Control", ImGuiTableColumnFlags_WidthFixed, 54.0f);   // PIC, or the levers button
     ImGui::TableSetupColumn("Ping", ImGuiTableColumnFlags_WidthFixed, 44.0f);
     ImGui::TableSetupColumn("Actions", ImGuiTableColumnFlags_WidthFixed, 132.0f);
     ImGui::TableHeadersRow();
@@ -548,9 +610,25 @@ void ConnectPage::ui_people_cai()
         ImGui::TableNextColumn();
         ImGui::AlignTextToFramePadding();
         const bool me = p.id == session.MyId_cai();
-        ImGui::TextUnformatted(fmt::format("{}{}{}", p.name, p.master ? "  " ICON_FA_CROWN : "", me ? "  (you)" : "").c_str());
-        if (p.master && ImGui::IsItemHovered())
-            ImGui::SetTooltip("The master: hosts the session, assigns seats, can take control.");
+        // Your own name in colour; "(you)" only where it fits (0.9.21: it was cut).
+        if (me)
+            ImGui::TextColored(ui::theme::kAqua, "%s", p.name.c_str());
+        else
+            ImGui::TextUnformatted(p.name.c_str());
+        if (me && ImGui::IsItemHovered())
+            ImGui::SetTooltip("That's you");
+        if (p.master) {
+            ImGui::SameLine(0.0f, 6.0f);
+            ImGui::TextUnformatted(ICON_FA_CROWN);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("The master: hosts the session, assigns seats, can take control.");
+        }
+        // The cell's visible edge is its clip rect (the content region runs past it in a table).
+        const float youX = ImGui::GetItemRectMax().x + 6.0f;
+        if (me && youX + ImGui::CalcTextSize("(you)").x <= ImGui::GetWindowDrawList()->GetClipRectMax().x) {
+            ImGui::SameLine(0.0f, 6.0f);
+            ImGui::TextDisabled("(you)");
+        }
         if (const std::string warn = FlagsText_cai(p.flags); !warn.empty()) {
             ImGui::SameLine();
             ImGui::TextColored(ui::theme::kChangedText, ICON_FA_EXCLAMATION_TRIANGLE);
@@ -568,18 +646,19 @@ void ConnectPage::ui_people_cai()
             ImGui::SameLine(0.0f, 4.0f);
             ImGui::TextColored(ui::theme::kSavedText, ICON_FA_CHAIR);
             if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("%s sits in the %s (only their own view; pick yours on the Flight deck)", p.name.c_str(),
+                ImGui::SetTooltip("%s sits in the %s (only their own view; pick yours under My seat or on the Flight deck)", p.name.c_str(),
                                   seats[p.seat].name.c_str());
         }
         ImGui::TableNextColumn();
         ImGui::AlignTextToFramePadding();
-        if (p.pic)
+        if (p.pic) {
             ImGui::TextColored(ui::theme::kSavedText, ICON_FA_PLANE " PIC");
-        else
-            ImGui::TextDisabled("-");
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("PIC = pilot in command: the one who has the controls.\n"
-                              "Wins conflicts after the host; the others move to the PIC's position.");
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("PIC = pilot in command: the one who has the controls.\n"
+                                  "Wins conflicts after the host; the others move to the PIC's position.");
+        } else {
+            ui_levers_button_cai(p);               // the levers this Crew member works (0.9.12)
+        }
         ImGui::TableNextColumn();
         ImGui::AlignTextToFramePadding();
         if (p.id == net::kHostId)
@@ -603,13 +682,14 @@ void ConnectPage::ui_priority_cai(const net::Person& p, const std::vector<net::P
     if (ImGui::IsItemHovered())
         ImGui::SetTooltip("Who wins when two people move the same control within 1 second:\n"
                           "the host, then the pilot in command, then this order (lower first)");
-    if (p.id == net::kHostId || !session.IsHost_cai())
+    if (p.id == net::kHostId || !CanReorder_cai(people))
         return;
     int last = 0;
     for (const net::Person& other : people)
         last = std::max(last, session.PriorityOf_cai(other.id));
     std::string why;
-    const ImVec2 size(14.0f, kRowButtonH);
+    const ImVec2 size(20.0f, kRowButtonH);
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0.0f, ImGui::GetStyle().FramePadding.y));
     ImGui::SameLine(0.0f, 4.0f);
     if (ui::ui_button_cai(ICON_FA_CARET_UP "##up", size, prio > 2))
         Report_cai(session.MovePriority_cai(p.id, -1, why), why);
@@ -620,6 +700,95 @@ void ConnectPage::ui_priority_cai(const net::Person& p, const std::vector<net::P
         Report_cai(session.MovePriority_cai(p.id, +1, why), why);
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
         ImGui::SetTooltip("Move %s down", p.name.c_str());
+    ImGui::PopStyleVar();
+}
+
+// The master can reorder only with two or more joiners (the host always stays first).
+bool ConnectPage::CanReorder_cai(const std::vector<net::Person>& people) const
+{
+    if (!mHub.Session_cai().IsHost_cai())
+        return false;
+    auto lmbda_joiner = [](const net::Person& p) { return p.id != net::kHostId; };
+    return std::count_if(people.begin(), people.end(), lmbda_joiner) >= 2;
+}
+
+// The levers of one Crew member: an icon (lit when they work some); the master opens the list.
+void ConnectPage::ui_levers_button_cai(const net::Person& p)
+{
+    net::NetSession& session = mHub.Session_cai();
+    const bool canSet = session.IsHost_cai() && p.role == net::Role::Crew;
+    const std::string label = p.levers ? fmt::format(ICON_FA_SLIDERS_H " {}##levers", std::popcount(p.levers))
+                                       : std::string(ICON_FA_SLIDERS_H "##levers");
+    if (p.levers)
+        ImGui::PushStyleColor(ImGuiCol_Text, ui::theme::kSavedText);
+    if (ui::ui_button_cai(label.c_str(), ImVec2(44.0f, kRowButtonH), canSet) || (mOpenLevers && mLeversFor == p.id && canSet)) {
+        mLeversFor = p.id;
+        mOpenLevers = false;
+        ImGui::OpenPopup("##leversPopup");
+    }
+    if (p.levers)
+        ImGui::PopStyleColor();
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+        const std::string works = p.levers ? fmt::format("{} works the {}.", p.name, net::LeverNames_cai(p.levers))
+                                           : fmt::format("{} works no levers (the PIC works them all).", p.name);
+        ImGui::SetTooltip("%s\n%s", works.c_str(),
+                          canSet ? "Press: choose the levers they work (throttle, flaps, ...)."
+                                 : (session.IsHost_cai() ? "Observers work no levers: make them Crew first."
+                                                         : "The master (the host) hands out the levers."));
+    }
+    ui_levers_popup_cai();
+}
+
+// The list of levers for one Crew member (the master): a box each; one owner per lever.
+void ConnectPage::ui_levers_popup_cai()
+{
+    if (!ImGui::BeginPopup("##leversPopup"))
+        return;
+    net::NetSession& session = mHub.Session_cai();
+    const net::Person* who = session.Find_cai(mLeversFor);
+    if (!who || who->pic || who->role != net::Role::Crew) {
+        ImGui::TextDisabled("Only for a Crew member who is not the PIC.");
+        ImGui::EndPopup();
+        return;
+    }
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted(fmt::format(ICON_FA_SLIDERS_H "  Levers {} works", who->name).c_str());
+    // Hide, at the top right (0.9.22): VR users need a target, not a click outside.
+    const float side = ImGui::GetFrameHeight();
+    const float right = ImGui::GetWindowContentRegionMax().x;
+    ImGui::SameLine(std::max(ImGui::GetItemRectMax().x - ImGui::GetWindowPos().x + 12.0f, right - side));
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0.0f, ImGui::GetStyle().FramePadding.y));
+    if (ui::ui_button_cai(ICON_FA_TIMES "##leversHide", ImVec2(side, side)))
+        ImGui::CloseCurrentPopup();
+    ImGui::PopStyleVar();
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Hide (changes are already applied)");
+    ImGui::Separator();
+    std::uint16_t levers = who->levers;
+    bool changed = false;
+    for (int i = 0; i < net::kLeverCount; ++i) {
+        const std::uint16_t bit = static_cast<std::uint16_t>(1u << i);
+        bool on = (levers & bit) != 0;
+        std::string owner;                                   // somebody else works it now
+        for (const net::Person& other : session.People_cai())
+            if (other.id != who->id && !other.pic && (other.levers & bit))
+                owner = other.name;
+        const std::string label = fmt::format("{}{}##lever{}", net::LeverName_cai(bit), owner.empty() ? "" : "   (now " + owner + ")", i);
+        if (ImGui::Checkbox(label.c_str(), &on)) {
+            levers = static_cast<std::uint16_t>(on ? (levers | bit) : (levers & ~bit));
+            changed = true;
+        }
+    }
+    if (changed) {
+        std::string why;
+        Report_cai(session.SetLevers_cai(who->id, levers, why), why);
+    }
+    ImGui::Separator();
+    ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + 300.0f);
+    ImGui::TextDisabled("They work these with their own hardware or mouse; everybody, the PIC too, follows. "
+                        "The yoke, rudder and toe brakes always stay with the PIC. Changes apply at once.");
+    ImGui::PopTextWrapPos();
+    ImGui::EndPopup();
 }
 
 // The action buttons of one row (always visible; disabled when they do not apply).
@@ -750,14 +919,8 @@ void ConnectPage::ui_position_cai()
             if (line.text.empty())
                 return;
             using StatusMark = net::StatusText::Mark;
-            ui_check_line_cai(line.mark == StatusMark::Ok ? Mark::Ok : line.mark == StatusMark::Warn ? Mark::Warn : Mark::Info, line.text);
-            if (!line.tooltip.empty() && ImGui::IsItemHovered()) {
-                ImGui::BeginTooltip();
-                ImGui::PushTextWrapPos(ImGui::GetFontSize() * 30.0f);
-                ImGui::TextUnformatted(line.tooltip.c_str());
-                ImGui::PopTextWrapPos();
-                ImGui::EndTooltip();
-            }
+            ui_check_line_cai(line.mark == StatusMark::Ok ? Mark::Ok : line.mark == StatusMark::Warn ? Mark::Warn : Mark::Info, line.text,
+                              line.tooltip);
         };
         if (flight.traceWriting)
             ui_check_line_cai(Mark::Info, fmt::format("Flight trace on ({:.0f} KB) - Home > About switches it off", flight.traceBytes / 1024.0));
@@ -773,31 +936,27 @@ void ConnectPage::ui_position_cai()
             ui_check_line_cai(ms < 3000 ? Mark::Ok : Mark::Warn,
                               fmt::format("Flight: {}'s yoke, pedals and levers {}{}", session.NameOf_cai(session.PicId_cai()),
                                           session.Rules_cai().flight == net::FlightMode::Follow ? "move yours" : "fly your aircraft",
-                                          ms < 1500 ? std::string() : fmt::format(" (nothing new for {} s)", ms / 1000)));
-            if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("Your own joystick and pedals are switched off while you are not the PIC.\n"
-                                  "Take control to fly yourself.");
+                                          ms < 1500 ? std::string() : fmt::format(" (nothing new for {} s)", ms / 1000)),
+                              "Your own joystick and pedals are switched off while you are not the PIC. Take control to fly yourself.");
         }
         if (!flight.iAmPic && flight.heldPerSecond > 0)
             ui_check_line_cai(Mark::Warn, fmt::format("A hardware lever here moves the levers ({} times a second) - held at the PIC's", flight.heldPerSecond));
         if (!flight.missing.empty()) {
-            ui_check_line_cai(Mark::Warn, fmt::format("Flight: {} controls not in this X-Plane", flight.missing.size()));
-            if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("%s", ListText_cai("Not found:", flight.missing).c_str());
+            ui_check_line_cai(Mark::Warn, fmt::format("Flight: {} controls not in this X-Plane", flight.missing.size()),
+                              ListText_cai("Not found:", flight.missing));
         }
         if (session.Rules_cai().copilotAxes) {
+            const std::string help = "The copilot binds their hardware to X-Plane's Copilot Pitch / Roll / Yaw axes. "
+                                     "Linked controls: the larger deflection wins. Fly-by-wire sticks: both are added. "
+                                     "Two people can fly at once - agree who flies.";
             if (!flight.copilotAvailable)
-                ui_check_line_cai(Mark::Warn, "Copilot axes: this X-Plane has no copilot side datarefs (needs a newer X-Plane 12)");
+                ui_check_line_cai(Mark::Warn, "Copilot axes: this X-Plane has no copilot side datarefs (needs a newer X-Plane 12)", help);
             else if (flight.iAmCopilot)
-                ui_check_line_cai(Mark::Warn, "Copilot axes: your stick / pedals fly the copilot side - for everybody");
+                ui_check_line_cai(Mark::Warn, "Copilot axes: your stick / pedals fly the copilot side - for everybody", help);
             else if (flight.copilotId != net::kNoId)
-                ui_check_line_cai(Mark::Warn, fmt::format("Copilot axes: {} is on the copilot side", session.NameOf_cai(flight.copilotId)));
+                ui_check_line_cai(Mark::Warn, fmt::format("Copilot axes: {} is on the copilot side", session.NameOf_cai(flight.copilotId)), help);
             else
-                ui_check_line_cai(Mark::Info, "Copilot axes: on - nobody on the copilot side now");
-            if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("The copilot binds their hardware to X-Plane's Copilot Pitch / Roll / Yaw axes.\n"
-                                  "Linked controls: the larger deflection wins. Fly-by-wire sticks: both are added.\n"
-                                  "Two people can fly at once - agree who flies.");
+                ui_check_line_cai(Mark::Info, "Copilot axes: on - nobody on the copilot side now", help);
         }
         if (flight.picPaused)
             ui_check_line_cai(Mark::Info, flight.iAmPic ? "Paused - by you (everybody is paused)" : "Paused by the PIC");
@@ -824,16 +983,15 @@ void ConnectPage::ui_position_cai()
     const long long ago = pos.weatherAt == std::chrono::steady_clock::time_point{} ? -1
         : std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - pos.weatherAt).count();
     const std::string when = ago < 0 ? std::string("not yet") : fmt::format("{} s ago", ago);
+    const std::string skipped = pos.weatherSkipped.empty() ? std::string() : ListText_cai("Skipped here:", pos.weatherSkipped);
     if (pos.weatherSending)
         ui_check_line_cai(pos.weatherSkipped.empty() ? Mark::Ok : Mark::Warn,
-                          fmt::format("Weather and time: sent to everybody ({} values, {})", pos.weatherValues, when));
+                          fmt::format("Weather and time: sent to everybody ({} values, {})", pos.weatherValues, when), skipped);
     else if (pos.weatherFollowing)
         ui_check_line_cai(pos.weatherSkipped.empty() ? Mark::Ok : Mark::Warn,
-                          fmt::format("Weather and time: following the host (updated {})", when));
+                          fmt::format("Weather and time: following the host (updated {})", when), skipped);
     else
         ui_check_line_cai(Mark::Info, "Weather and time: your own ([position] weather=0)");
-    if (!pos.weatherSkipped.empty() && ImGui::IsItemHovered())
-        ImGui::SetTooltip("%s", ListText_cai("Skipped here:", pos.weatherSkipped).c_str());
 }
 
 // A check line with a button at the right end. True when pressed.
@@ -866,15 +1024,13 @@ void ConnectPage::ui_sharing_cai()
     const std::size_t cmdMissing = sync.commands - sync.commandsOk;
     ui_check_line_cai(cmdMissing == 0 ? Mark::Ok : Mark::Warn,
                       fmt::format("{} shared commands - {} found here{}", sync.commands, sync.commandsOk,
-                                  cmdMissing == 0 ? std::string() : fmt::format(", {} missing", cmdMissing)));
-    if (!sync.missing.empty() && ImGui::IsItemHovered())
-        ImGui::SetTooltip("%s", ListText_cai("Not in this X-Plane (skipped here):", sync.missing).c_str());
+                                  cmdMissing == 0 ? std::string() : fmt::format(", {} missing", cmdMissing)),
+                      sync.missing.empty() ? std::string() : ListText_cai("Not in this X-Plane (skipped here):", sync.missing));
     const std::size_t refSkipped = sync.datarefs - sync.datarefsOk;
     ui_check_line_cai(refSkipped == 0 ? Mark::Ok : Mark::Warn,
                       fmt::format("{} shared values (switches, knobs, levers) - {} usable here{}", sync.datarefs,
-                                  sync.datarefsOk, refSkipped == 0 ? std::string() : fmt::format(", {} skipped", refSkipped)));
-    if (!sync.readOnly.empty() && ImGui::IsItemHovered())
-        ImGui::SetTooltip("%s", ListText_cai("Read-only or another type here (skipped):", sync.readOnly).c_str());
+                                  sync.datarefsOk, refSkipped == 0 ? std::string() : fmt::format(", {} skipped", refSkipped)),
+                      sync.readOnly.empty() ? std::string() : ListText_cai("Read-only or another type here (skipped):", sync.readOnly));
     if (log::IsEnabled_cai(log::Level::Debug)) {
         for (const std::string& name : sync.missing)
             ui_check_line_cai(Mark::Warn, fmt::format("missing: {}", name));
@@ -902,7 +1058,7 @@ std::string ConnectPage::ListText_cai(const char* title, const std::vector<std::
 }
 
 // One check line.
-void ConnectPage::ui_check_line_cai(Mark mark, const std::string& text)
+void ConnectPage::ui_check_line_cai(Mark mark, const std::string& text, const std::string& help)
 {
     const char* icon = ICON_FA_INFO_CIRCLE;
     const ImVec4* color = &ui::theme::kTextDim;
@@ -917,7 +1073,17 @@ void ConnectPage::ui_check_line_cai(Mark mark, const std::string& text)
     const float x = ImGui::GetCursorPosX();
     ImGui::TextColored(*color, "%s", icon);
     ImGui::SameLine(x + iconCell);
-    ui::ui_wrapped_text_cai(text);
+    if (help.empty()) {
+        ui::ui_wrapped_text_cai(text);
+        return;
+    }
+    // The details in a (?) at the end: clickable in VR (0.9.26, was a hover tooltip).
+    const float marker = ImGui::CalcTextSize("(?)").x + ImGui::GetStyle().ItemSpacing.x;
+    ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + std::max(40.0f, ImGui::GetContentRegionAvail().x - marker));
+    ImGui::TextUnformatted(text.c_str());
+    ImGui::PopTextWrapPos();
+    ImGui::SameLine();
+    ui::ui_help_marker_cai(help.c_str());
 }
 
 // Status, buttons and the feed.
@@ -1003,6 +1169,7 @@ void ConnectPage::ui_popup_remove_cai()
 // Starts hosting.
 void ConnectPage::DoHost_cai()
 {
+    mEndedAt = {};                                  // the red header ends with a new try
     net::HostSettings host;
     host.port = mSettings.connect.hostPort;
     host.password = mHostPassword;
@@ -1019,6 +1186,7 @@ void ConnectPage::DoHost_cai()
 // Joins.
 void ConnectPage::DoJoin_cai()
 {
+    mEndedAt = {};
     net::JoinSettings join;
     std::string address(Utils::Trim_cai(mJoinAddress));
     // "address:port" also works.

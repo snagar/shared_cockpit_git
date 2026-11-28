@@ -208,7 +208,7 @@ void DatarefSync::Apply_cai(const net::RemoteValues& values)
     } else if (values.kind == net::RemoteValues::Kind::Snapshot) {
         LOG_INFO("snapshot: {} values written", written);
         mHub.Position_cai().snapshotAt = Clock::now();
-        mHub.Note_cai(net::SessionEvent::Kind::Notice, fmt::format("The cockpit was set to the session's state ({} values)", written));
+        mHub.Note_cai(net::SessionEvent::Kind::Notice, fmt::format("Cockpit matched to the host's ({} control{})", written, written == 1 ? "" : "s"));
     }
 }
 

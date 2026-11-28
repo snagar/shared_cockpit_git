@@ -1,8 +1,10 @@
 // shared_cockpit - the flight deck: a small 2D window for flying in a session
 
 #include "flightdeck/FlightDeckWindow.h"
+#include "shared/ui/Clipboard.h"
 
 #include <algorithm>
+#include <bit>
 #include <cfloat>
 #include <chrono>
 
@@ -58,30 +60,7 @@ std::string Title_cai(const net::NetSession& session, bool withPic)
     return {};
 }
 
-// A small square button that is just its icon (centred), with a hover / press background.
-bool ui_icon_button_cai(const char* id, const char* icon, const ImVec4& color = ui::theme::kButton)
-{
-    const float side = ImGui::GetFontSize() + 8.0f;
-    const ImVec2 at = ImGui::GetCursorScreenPos();
-    // Vertically centred on the row's text.
-    const float rowH = ImGui::GetFrameHeight();
-    if (rowH > side)
-        ImGui::SetCursorScreenPos(ImVec2(at.x, at.y + (rowH - side) * 0.5f));
-    const ImVec2 pos = ImGui::GetCursorScreenPos();
-    const bool pressed = ImGui::InvisibleButton(id, ImVec2(side, side));
-    const bool hovered = ImGui::IsItemHovered();
-    const bool held = ImGui::IsItemActive();
-    ImVec4 bg = color;
-    bg.w = held ? 1.0f : hovered ? 0.85f : 0.0f;               // only a background when pointed at
-    ImDrawList* draw = ImGui::GetWindowDrawList();
-    if (bg.w > 0.0f)
-        draw->AddRectFilled(pos, ImVec2(pos.x + side, pos.y + side), ImGui::GetColorU32(bg), 4.0f);
-    const ImVec2 iconSize = ImGui::CalcTextSize(icon);
-    const ImVec4& iconColor = bg.w > 0.0f ? ui::theme::kTextOnColor : ui::theme::kText;
-    draw->AddText(ImVec2(pos.x + (side - iconSize.x) * 0.5f, pos.y + (side - iconSize.y) * 0.5f),
-                  ImGui::GetColorU32(iconColor), icon);
-    return pressed;
-}
+using ui::ui_icon_button_cai;                    // moved to Widgets (0.9.28)
 
 // The X-Plane window's area in global boxels (left, top, right, bottom).
 // XPLMGetScreenBoundsGlobal alone does not follow the X-Plane window when it is restored /
@@ -137,6 +116,7 @@ FlightDeckWindow::FlightDeckWindow(net::SessionHub& hub, settings::Settings& set
       mSettings(settings),
       mPanel(hub)
 {
+    ui::InstallClipboard_cai();                     // Linux: Ctrl+C / Ctrl+V reach the system clipboard (0.9.23)
     SetWindowTitle("Shared Cockpit - flight deck");
     mChosen = static_cast<Size>(std::clamp(mSettings.flightDeck.size, 0, 2));
     mApplied = mChosen;
@@ -359,8 +339,18 @@ void FlightDeckPanel::ui_draw_cai(Size size)
         std::string state;
         if (!follow.text.empty() && !iAmPic)
             state = flight.farAway ? "  too far" : flight.holding ? "  holding" : flight.following ? fmt::format("  {:.1f} m", flight.gapM) : "  ...";
-        ImGui::TextUnformatted(fmt::format(ICON_FA_PLANE "  PIC: {}", iAmPic ? std::string("you")
-                                                                          : session.NameOf_cai(session.PicId_cai())).c_str());
+        // "You have control": 3 s of pulsing green after I became the PIC (0.9.12).
+        if (session.PicId_cai() != mPicSeen) {
+            mPicSeen = session.PicId_cai();
+            mPicSince = std::chrono::steady_clock::now();
+        }
+        const bool fresh = iAmPic && std::chrono::steady_clock::now() - mPicSince < std::chrono::seconds(3);
+        const std::string picLine = fmt::format(ICON_FA_PLANE "  PIC: {}", iAmPic ? std::string(fresh ? "you have control" : "you")
+                                                                               : session.NameOf_cai(session.PicId_cai()));
+        if (fresh)
+            ImGui::TextColored(ui::ui_pulse_color_cai(ui::theme::kSavedText, 0.6f), "%s", picLine.c_str());
+        else
+            ImGui::TextUnformatted(picLine.c_str());
         if (ImGui::IsItemHovered())
             Tooltip_cai(follow.text.empty() ? "PIC = pilot in command: the one who has the controls"
                                             : fmt::format("PIC = pilot in command: the one who has the controls\n{}", follow.text).c_str());
@@ -372,7 +362,17 @@ void FlightDeckPanel::ui_draw_cai(Size size)
                 Tooltip_cai(follow.text.c_str());
         }
         ImGui::SameLine(ImGui::GetContentRegionMax().x * 0.55f);
-        ImGui::TextDisabled("You: %s%s", me ? net::RoleName_cai(me->role) : "-", session.IsHost_cai() ? " (master)" : "");
+        const std::uint16_t levers = session.MyLevers_cai();   // the levers my hands work (0.9.12)
+        if (levers) {
+            const int count = std::popcount(levers);
+            ImGui::TextColored(ui::theme::kSavedText, "%s", count == 1 ? fmt::format("You: {}", net::LeverName_cai(levers)).c_str()
+                                                                       : fmt::format("You: {} levers", count).c_str());
+        }
+        else
+            ImGui::TextDisabled("You: %s%s", me ? net::RoleName_cai(me->role) : "-", session.IsHost_cai() ? " (master)" : "");
+        if (levers && ImGui::IsItemHovered())
+            Tooltip_cai(fmt::format("You work the {} (your hardware or mouse);\neverybody, the PIC too, follows them.",
+                                    net::LeverNames_cai(levers)).c_str());
         if (mSeats)
             ui_seat_row_cai();
         ui_control_buttons_cai();
@@ -436,7 +436,7 @@ void FlightDeckPanel::ui_seat_row_cai()
     if (ImGui::IsItemHovered())
         Tooltip_cai(fmt::format("{} seats from {}. Your seat is only your view:\nit changes nothing for the others.{}",
                                 seats.size(), mSeats->Source_cai(),
-                                mSeats->InVr_cai() ? "\nIn VR: use X-Plane's teleport to the seat." : "").c_str());
+                                mSeats->InVr_cai() ? "\nIn VR the view slides to the seat (only the position)." : "").c_str());
     ImGui::SameLine();
     if (ui_icon_button_cai("##seatBack", ICON_FA_UNDO))
         mSeatBack = true;
@@ -453,7 +453,10 @@ bool FlightDeckPanel::ui_light_cai(float radius)
     const bool hovered = ImGui::IsItemHovered();
     const ImVec2 centre(at.x + size.x * 0.5f, at.y + size.y * 0.5f);
     ImDrawList* draw = ImGui::GetWindowDrawList();
-    draw->AddCircleFilled(centre, radius + (hovered ? 1.5f : 0.0f), LightColor_cai(mHub.Session_cai().State_cai()));
+    ImU32 light = LightColor_cai(mHub.Session_cai().State_cai());
+    if (!mHub.Session_cai().Questions_cai().empty())         // a question waits: the light pulses orange
+        light = ImGui::GetColorU32(ui::ui_pulse_color_cai(ui::theme::kChanged, 0.6f));
+    draw->AddCircleFilled(centre, radius + (hovered ? 1.5f : 0.0f), light);
     draw->AddCircle(centre, radius + (hovered ? 1.5f : 0.0f), ImGui::GetColorU32(ui::theme::kText), 0, 1.0f);
     if (hovered)
         Tooltip_cai(fmt::format("{}\nPress: show / hide the Shared Cockpit window", net::StatusLine_cai(mHub.Session_cai())).c_str());
@@ -497,14 +500,15 @@ bool FlightDeckPanel::ui_question_cai()
     const long long left = std::max<long long>(
         0, std::chrono::duration_cast<std::chrono::seconds>(q.until - std::chrono::steady_clock::now()).count());
     const float buttonsW = 2.0f * kAnswerW + ImGui::GetStyle().ItemSpacing.x;
+    const ImVec4 pulseText = ui::ui_pulse_color_cai(ui::theme::kChangedText, 0.6f);
     ImGui::AlignTextToFramePadding();
     ui::ui_text_ellipsis_cai(fmt::format(ICON_FA_HAND_PAPER " {} {} {}s", q.fromName,
                                          q.kind == net::Question::Kind::Request ? "asks for control" : "offers control", left),
                              ImGui::GetContentRegionAvail().x - buttonsW - ImGui::GetStyle().ItemSpacing.x,
-                             &ui::theme::kChangedText);
+                             &pulseText);
     ImGui::SameLine();
     std::string why;
-    if (ui::ui_color_button_cai(ICON_FA_CHECK "##yes", ImVec2(kAnswerW, 0.0f), ui::theme::kSaved))
+    if (ui::ui_color_button_cai(ICON_FA_CHECK "##yes", ImVec2(kAnswerW, 0.0f), ui::ui_pulse_color_cai(ui::theme::kSaved)))
         session.AnswerControl_cai(q.fromId, true, why);
     ImGui::SameLine();
     if (ui::ui_color_button_cai(ICON_FA_TIMES "##no", ImVec2(kAnswerW, 0.0f), ui::theme::kError))

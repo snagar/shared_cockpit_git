@@ -175,9 +175,76 @@ constexpr MsgType kTypes[] = {MsgType::Hello, MsgType::Challenge, MsgType::Proof
                               MsgType::Correction, MsgType::Snapshot, MsgType::Priority, MsgType::Position,
                               MsgType::Weather, MsgType::SnapshotRequest, MsgType::Rules, MsgType::FlightInputs,
                               MsgType::Pause, MsgType::CopilotInputs, MsgType::FlightState, MsgType::Load,
-                              MsgType::Seats, MsgType::SeatChoice};
+                              MsgType::Seats, MsgType::SeatChoice, MsgType::Levers};
+
+// The fields of FlightInputs (MsgFlightInputs, MsgLevers).
+void WriteInputs_cai(Writer& w, const FlightInputs& f)
+{
+    w.F32_cai(f.yokePitch); w.F32_cai(f.yokeRoll); w.F32_cai(f.yokeHeading);
+    w.F32_cai(f.brakeLeft); w.F32_cai(f.brakeRight); w.F32_cai(f.parkingBrake); w.F32_cai(f.speedbrake);
+    auto lmbda_array = [&w](const std::vector<float>& values) {
+        const std::size_t n = std::min<std::size_t>(values.size(), kMaxEngines);
+        w.U8_cai(static_cast<std::uint8_t>(n));
+        for (std::size_t i = 0; i < n; ++i)
+            w.F32_cai(values[i]);
+    };
+    lmbda_array(f.throttle); lmbda_array(f.prop); lmbda_array(f.mixture);
+    w.F32_cai(f.trimElevator); w.F32_cai(f.trimAileron); w.F32_cai(f.trimRudder); w.F32_cai(f.flapRequest);
+    const std::size_t modes = std::min<std::size_t>(f.propMode.size(), kMaxEngines);
+    w.U8_cai(static_cast<std::uint8_t>(modes));
+    for (std::size_t i = 0; i < modes; ++i)
+        w.U8_cai(f.propMode[i]);
+}
+
+// The same, read.
+void ReadInputs_cai(Reader& r, FlightInputs& f)
+{
+    f.yokePitch = r.F32_cai(); f.yokeRoll = r.F32_cai(); f.yokeHeading = r.F32_cai();
+    f.brakeLeft = r.F32_cai(); f.brakeRight = r.F32_cai(); f.parkingBrake = r.F32_cai(); f.speedbrake = r.F32_cai();
+    auto lmbda_array = [&r](std::vector<float>& values) {
+        const std::size_t n = std::min<std::size_t>(r.U8_cai(), kMaxEngines);
+        values.resize(n);
+        for (std::size_t i = 0; i < n; ++i)
+            values[i] = r.F32_cai();
+    };
+    lmbda_array(f.throttle); lmbda_array(f.prop); lmbda_array(f.mixture);
+    f.trimElevator = r.F32_cai(); f.trimAileron = r.F32_cai(); f.trimRudder = r.F32_cai(); f.flapRequest = r.F32_cai();
+    f.propMode.resize(std::min<std::size_t>(r.U8_cai(), kMaxEngines));
+    for (std::uint8_t& mode : f.propMode)
+        mode = r.U8_cai();
+}
 
 } // namespace
+
+// A lever's name.
+const char* LeverName_cai(std::uint16_t bit)
+{
+    switch (bit) {
+        case kLeverThrottle:   return "throttle";
+        case kLeverProp:       return "prop";
+        case kLeverMixture:    return "mixture";
+        case kLeverFlaps:      return "flaps";
+        case kLeverSpeedbrake: return "speed brake";
+        case kLeverTrims:      return "trims";
+        case kLeverParking:    return "parking brake";
+        default:               return "?";
+    }
+}
+
+// "throttle, mixture and flaps".
+std::string LeverNames_cai(std::uint16_t levers)
+{
+    std::vector<std::string> names;
+    for (int i = 0; i < kLeverCount; ++i)
+        if (levers & (1u << i))
+            names.emplace_back(LeverName_cai(static_cast<std::uint16_t>(1u << i)));
+    if (names.empty())
+        return "no levers";
+    std::string text = names.front();
+    for (std::size_t i = 1; i < names.size(); ++i)
+        text += (i + 1 == names.size() ? " and " : ", ") + names[i];
+    return text;
+}
 
 // The name of a message type, for the log.
 const char* MsgTypeName_cai(MsgType type)
@@ -214,6 +281,8 @@ const char* MsgTypeName_cai(MsgType type)
         case MsgType::Load:           return "Load";
         case MsgType::Seats:          return "Seats";
         case MsgType::SeatChoice:     return "SeatChoice";
+        case MsgType::Levers:         return "Levers";
+        case MsgType::SetLevers:      return "SetLevers";
     }
     return "?";
 }
@@ -289,7 +358,7 @@ Bytes EncodeMessage_cai(const Message& message)
             w.U8_cai(static_cast<std::uint8_t>(m.people.size()));
             for (const Person& p : m.people) {
                 w.U8_cai(p.id); w.Str_cai(p.name); w.U8_cai(static_cast<std::uint8_t>(p.role)); w.Bool_cai(p.master);
-                w.Bool_cai(p.pic); w.U16_cai(p.pingMs); w.U8_cai(p.flags); w.U8_cai(p.seat);
+                w.Bool_cai(p.pic); w.U16_cai(p.pingMs); w.U8_cai(p.flags); w.U8_cai(p.seat); w.U16_cai(p.levers);
             }
         } else if constexpr (std::is_same_v<T, MsgControlRequest>) {
             w.U8_cai(m.fromId);
@@ -327,22 +396,11 @@ Bytes EncodeMessage_cai(const Message& message)
         } else if constexpr (std::is_same_v<T, MsgSnapshotRequest>) {
             // no fields
         } else if constexpr (std::is_same_v<T, MsgFlightInputs>) {
-            const FlightInputs& f = m.inputs;
             w.U8_cai(m.id); w.U32_cai(m.sequence);
-            w.F32_cai(f.yokePitch); w.F32_cai(f.yokeRoll); w.F32_cai(f.yokeHeading);
-            w.F32_cai(f.brakeLeft); w.F32_cai(f.brakeRight); w.F32_cai(f.parkingBrake); w.F32_cai(f.speedbrake);
-            auto lmbda_array = [&w](const std::vector<float>& values) {
-                const std::size_t n = std::min<std::size_t>(values.size(), kMaxEngines);
-                w.U8_cai(static_cast<std::uint8_t>(n));
-                for (std::size_t i = 0; i < n; ++i)
-                    w.F32_cai(values[i]);
-            };
-            lmbda_array(f.throttle); lmbda_array(f.prop); lmbda_array(f.mixture);
-            w.F32_cai(f.trimElevator); w.F32_cai(f.trimAileron); w.F32_cai(f.trimRudder); w.F32_cai(f.flapRequest);
-            const std::size_t modes = std::min<std::size_t>(f.propMode.size(), kMaxEngines);
-            w.U8_cai(static_cast<std::uint8_t>(modes));
-            for (std::size_t i = 0; i < modes; ++i)
-                w.U8_cai(f.propMode[i]);
+            WriteInputs_cai(w, m.inputs);
+        } else if constexpr (std::is_same_v<T, MsgLevers>) {
+            w.U8_cai(m.id); w.U16_cai(m.levers);
+            WriteInputs_cai(w, m.inputs);
         } else if constexpr (std::is_same_v<T, MsgPause>) {
             w.U8_cai(m.id); w.Bool_cai(m.paused);
         } else if constexpr (std::is_same_v<T, MsgCopilotInputs>) {
@@ -424,7 +482,7 @@ std::optional<Message> DecodeMessage_cai(const std::uint8_t* data, std::size_t s
             const std::uint8_t count = r.U8_cai();
             for (std::uint8_t i = 0; i < count && r.Ok_cai(); ++i) {
                 Person p; p.id = r.U8_cai(); p.name = r.Str_cai(); p.role = static_cast<Role>(r.U8_cai()); p.master = r.Bool_cai();
-                p.pic = r.Bool_cai(); p.pingMs = r.U16_cai(); p.flags = r.U8_cai(); p.seat = r.U8_cai();
+                p.pic = r.Bool_cai(); p.pingMs = r.U16_cai(); p.flags = r.U8_cai(); p.seat = r.U8_cai(); p.levers = r.U16_cai();
                 m.people.push_back(std::move(p));
             }
             out = m; break;
@@ -463,21 +521,15 @@ std::optional<Message> DecodeMessage_cai(const std::uint8_t* data, std::size_t s
         case MsgType::Weather:         { MsgWeather m; m.values = r.Values_cai(); out = m; break; }
         case MsgType::SnapshotRequest: { out = MsgSnapshotRequest{}; break; }
         case MsgType::FlightInputs: {
-            MsgFlightInputs m; FlightInputs& f = m.inputs;
+            MsgFlightInputs m;
             m.id = r.U8_cai(); m.sequence = r.U32_cai();
-            f.yokePitch = r.F32_cai(); f.yokeRoll = r.F32_cai(); f.yokeHeading = r.F32_cai();
-            f.brakeLeft = r.F32_cai(); f.brakeRight = r.F32_cai(); f.parkingBrake = r.F32_cai(); f.speedbrake = r.F32_cai();
-            auto lmbda_array = [&r](std::vector<float>& values) {
-                const std::size_t n = std::min<std::size_t>(r.U8_cai(), kMaxEngines);
-                values.resize(n);
-                for (std::size_t i = 0; i < n; ++i)
-                    values[i] = r.F32_cai();
-            };
-            lmbda_array(f.throttle); lmbda_array(f.prop); lmbda_array(f.mixture);
-            f.trimElevator = r.F32_cai(); f.trimAileron = r.F32_cai(); f.trimRudder = r.F32_cai(); f.flapRequest = r.F32_cai();
-            f.propMode.resize(std::min<std::size_t>(r.U8_cai(), kMaxEngines));
-            for (std::uint8_t& mode : f.propMode)
-                mode = r.U8_cai();
+            ReadInputs_cai(r, m.inputs);
+            out = m; break;
+        }
+        case MsgType::Levers: {
+            MsgLevers m;
+            m.id = r.U8_cai(); m.levers = r.U16_cai();
+            ReadInputs_cai(r, m.inputs);
             out = m; break;
         }
         case MsgType::Pause: { MsgPause m; m.id = r.U8_cai(); m.paused = r.Bool_cai(); out = m; break; }

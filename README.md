@@ -1,45 +1,39 @@
 # Shared Cockpit
 
-X-Plane plugin that will share one cockpit between two X-Plane simulators.
-Version 0.1.1 delivers the first step: **analyse an airplane and pick what to share**.
+X-Plane 12 plugin: up to 4 simulators fly one aircraft together. One person is the **PIC** (pilot in
+command) and flies; the others are **Crew** (work the shared switches, knobs and - when the host gives
+them - levers) or **Observers**. Control is handed over with a click. Version 0.9.12 (beta, network
+protocol 11) for Linux, Windows and macOS.
 
 **Before a shared flight, read [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md)** - what is shared, what
 is not, and what to expect.
 
 Drawn with [Dear ImGui](https://github.com/ocornut/imgui) through
-[ImgWindow](https://github.com/slgoldberg/ImgWindow), like vrconfig_helper.
+[ImgWindow](https://github.com/slgoldberg/ImgWindow). The libraries and their licenses: Home > About >
+Libraries.
 
 ## Using it in X-Plane
 
 * Menu: **Plugins > Shared Cockpit > Toggle Window**, or the command
-  `shared_cockpit/toggle_main_window` (bind it to a key, joystick or VR controller button).
-* The window is 780 x 540 by default and can be resized (640 x 480 up to 1600 x 1100).
-  Opened in VR, it appears in VR and follows X-Plane in and out of VR.
-* **Home** shows the steps of a shared flight. In 0.1.1 only step 1 works; Connect and
-  Flight deck are shown, disabled.
-* **Step 1 - Analyse airplane & pick what to share**
-  1. *Pick the airplane*: the loaded aircraft, or any other `.acf` below X-Plane's
-     Aircraft folder (searched in the background, with a filter).
-  2. *Read the aircraft files*: reads the `.acf` object list and every OBJ file
-     (`ATTR_manip_*` lines) in the background, with progress and Stop. Click areas of the
-     same control are merged into one control.
-  3. *Review and pick what to share*:
-     * the **filter box** shows one row per category (Commands, Datarefs, Can't sync) in
-       the *Type* view, or per name space (`sim`, `laminar`, `aerobask`, ...) in the
-       *System* view; each pill shows or hides a group; an orange pill `7/8` has unticked
-       controls;
-     * **Group by Type / System**: two views of the same controls and ticks;
-     * group headers have a fold arrow and a three-state tick (all / some / none);
-       **All**, **None** and **Fold all** apply to the visible groups;
-     * a ticked control is shared with the other pilot; an unticked one is kept local
-       (struck through); can't-sync controls (`ATTR_manip_device` touchscreens) are locked;
-     * the **Shareability** card predicts, from the files, how well each system can be
-       shared (Full, Mostly, Partial, None, Check in sim) and gives the reason.
-  4. **Save** writes `<acf name>.shared_cockpit.json` next to the `.acf`, plus a copy in
-     `Resources/plugins/shared_cockpit/backups/`. When the aircraft's file is missing but
-     the copy exists (an installer replaced the aircraft folder), **Restore backup** puts
-     it back. **Read again** keeps your ticks: controls are matched by type and commands /
-     datarefs; new controls get the default rules.
+  `shared_cockpit/toggle_main_window`. The main window works in VR too.
+* **Step 1 - Analyse airplane & pick what to share** (the host): the plugin reads the aircraft's files,
+  finds every clickable control and proposes what to share; a Shareability card grades each system.
+  Joiners receive the host's analysis when they connect.
+* **Step 2 - Connect**: host (UDP port 39100 by default) or join by address or machine name. Your name
+  and addresses show in aqua before hosting. The host's Session settings apply to everybody.
+* **Step 3 - Fly** with the small **Flight deck** window: who is PIC, ask for / take control, your seat.
+* **Flying together: "Follow the PIC"** - every aircraft stays on the PIC's (the only supported way in
+  this beta). The PIC's fuel and payload, the host's weather and time, and pause are shared; the
+  crew's real weather is switched off for the session.
+* **Handover**: offers and requests wait 25 s, pulse and chime; the new PIC's yoke and rudder blend in
+  over 1 s.
+* **Crew levers**: on the Connect page the host gives a Crew member levers (throttle, prop, mixture,
+  flaps, speed brake, trims, parking brake); they work them, everybody follows. The yoke, rudder and
+  toe brakes always stay with the PIC.
+* **Seats**: the aircraft's vrconfig teleport hotspots (the host's, for everybody); pick one on the
+  Flight deck; commands `shared_cockpit/seat/back_to_my_seat`, `next`, `previous`. Not in VR yet.
+* **Home > About**: version, flight trace and plugin log detail (for testing), this
+  computer's addresses, the libraries.
 
 ## The analysis file
 

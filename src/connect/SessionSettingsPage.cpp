@@ -8,6 +8,7 @@
 
 #include "shared/log/Log.h"
 #include "shared/ui/Theme.h"
+#include "shared/sync/Chimes.h"
 #include "shared/ui/Widgets.h"
 
 namespace sc::pages {
@@ -60,21 +61,7 @@ void SessionSettingsPage::ui_top_bar_cai(bool editable)
 void SessionSettingsPage::ui_section_cai(const char* title, const char* help)
 {
     ImGui::Spacing();
-    const ImGuiStyle& style = ImGui::GetStyle();
-    ImDrawList* draw = ImGui::GetWindowDrawList();
-    const ImU32 lineColor = ImGui::GetColorU32(ImGuiCol_Separator);
-    const float lineY = ImGui::GetCursorScreenPos().y + ImGui::GetTextLineHeight() * 0.5f;
-    const float left = ImGui::GetCursorScreenPos().x;
-    const float lead = style.SeparatorTextPadding.x;          // the short line before the title, like SeparatorText
-    draw->AddLine(ImVec2(left, lineY), ImVec2(left + lead - 6.0f, lineY), lineColor, style.SeparatorTextBorderSize);
-    ImGui::SetCursorScreenPos(ImVec2(left + lead, ImGui::GetCursorScreenPos().y));
-    ImGui::TextUnformatted(title);
-    ImGui::SameLine(0.0f, 6.0f);
-    ui::ui_help_marker_cai(help);
-    const float from = ImGui::GetItemRectMax().x + 6.0f;
-    const float to = ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x;
-    if (to > from)
-        draw->AddLine(ImVec2(from, lineY), ImVec2(to, lineY), lineColor, style.SeparatorTextBorderSize);
+    ui::ui_separator_help_cai(title, help);
 }
 
 // The label column of a row.
@@ -82,13 +69,9 @@ void SessionSettingsPage::ui_label_cai(const char* label, const char* tooltip)
 {
     ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted(label);
-    if (tooltip && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-        // Wrapped like the (?) markers: the text has no line breaks of its own.
-        ImGui::BeginTooltip();
-        ImGui::PushTextWrapPos(ImGui::GetFontSize() * 30.0f);
-        ImGui::TextUnformatted(tooltip);
-        ImGui::PopTextWrapPos();
-        ImGui::EndTooltip();
+    if (tooltip) {                                  // a (?) marker: clickable in VR (0.9.26, was a tooltip)
+        ImGui::SameLine(0.0f, 6.0f);
+        ui::ui_help_marker_cai(tooltip);
     }
     ImGui::SameLine(kLabelW);
 }
@@ -164,6 +147,42 @@ void SessionSettingsPage::Apply_cai(const net::SessionRules& rules)
     if (!mSettings.Save_cai(error))
         LOG_WARN("settings not saved: {}", error);
     mHub.Session_cai().SetOwnRules_cai(clamped);
+}
+
+// Getting attention (0.9.12): this computer's own, not session rules. Saved; apply at once.
+void SessionSettingsPage::ui_alerts_cai()
+{
+    ui_section_cai("Alerts and VR (this computer only)",
+                   "Your own: how a control offer or request, \"you have control\", a message and a lost PIC get your attention, "
+                   "and the window in VR. Saved in shared_cockpit.ini [alerts]; not sent to anybody.");
+    settings::AlertSettings& alerts = mSettings.alerts;
+    bool changed = false;
+    ui_label_cai("Pulse questions", "Control offers / requests and \"you have control\" pulse softly (off: steady colours).");
+    changed |= ImGui::Checkbox("##pulse", &alerts.pulse);
+    ui_label_cai("Chimes", "A short chime for: a control offer or request, you have control, a message, "
+                           "and following stopped (no data from the PIC). Needs X-Plane 12.");
+    changed |= ImGui::Checkbox("##chimes", &alerts.chimes);
+    ImGui::SameLine();
+    ImGui::BeginDisabled(!alerts.chimes);
+    ImGui::SetNextItemWidth(140.0f);
+    changed |= ImGui::SliderInt("##chimeVolume", &alerts.volume, 0, 100, "volume %d%%");
+    ImGui::SameLine();
+    sync::Chimes* chimes = sync::Chimes::Instance_cai();
+    const bool canPlay = chimes && chimes->Available_cai();
+    if (ui::ui_button_cai(ICON_FA_BELL " Test", ImVec2(0.0f, 0.0f), canPlay))
+        chimes->Play_cai(sync::Chimes::Kind::Question);
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        ImGui::SetTooltip(canPlay ? "Plays the question chime" : "This X-Plane has no sound for plugins (X-Plane 12 needed)");
+    ImGui::EndDisabled();
+    ui_label_cai("Window follows me (VR)", "After you pick a seat in VR, this window closes and opens again in front of you "
+                                           "(only when it is open).");
+    changed |= ImGui::Checkbox("##vrfollow", &alerts.vrWindowFollows);
+    if (changed) {
+        ui::ui_set_pulse_cai(alerts.pulse);
+        std::string error;
+        if (!mSettings.Save_cai(error))
+            LOG_WARN("settings not saved: {}", error);
+    }
 }
 
 // Draws the page.
@@ -326,6 +345,7 @@ void SessionSettingsPage::ui_draw_cai()
     ImGui::EndDisabled();
 
     ImGui::EndDisabled();
+    ui_alerts_cai();                                // mine only: always editable
     ImGui::EndChild();
 
     if (editable) {

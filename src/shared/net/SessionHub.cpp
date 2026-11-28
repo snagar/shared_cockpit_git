@@ -29,6 +29,16 @@ std::string ClockNow_cai()
 
 } // namespace
 
+// True for a message someone else wrote ("Bob: ready?"), not mine nor a session notice ("Bob works the flaps").
+bool SessionHub::IsMessage_cai(const std::string& text) const
+{
+    for (const Person& p : mSession.People_cai())
+        if (p.id != mSession.MyId_cai() && !p.name.empty() && text.size() > p.name.size() + 2 && text.compare(0, p.name.size(), p.name) == 0 &&
+            text.compare(p.name.size(), 2, ": ") == 0)
+            return true;
+    return false;
+}
+
 // Counts one change.
 void SessionHub::CountChange_cai()
 {
@@ -44,6 +54,10 @@ void SessionHub::Poll_cai()
         mRecentChanges.pop_front();
     mSync.perMinute = mRecentChanges.size();
     for (SessionEvent& event : mSession.TakeEvents_cai()) {
+        if (event.kind == SessionEvent::Kind::Question)
+            ++mQuestionCount;
+        else if (event.kind == SessionEvent::Kind::Notice && IsMessage_cai(event.text))
+            ++mNoticeCount;                             // a chime only for what someone wrote
         if (event.kind == SessionEvent::Kind::People || event.kind == SessionEvent::Kind::Question ||
             event.kind == SessionEvent::Kind::ControlChanged || event.kind == SessionEvent::Kind::State)
             ++mChangeRevision;

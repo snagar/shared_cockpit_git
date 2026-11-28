@@ -1,6 +1,8 @@
 // shared_cockpit - seats: jump to one of the aircraft's vrconfig hotspots (0.9.6)
 #include "shared/sync/SeatSync.h"
 
+#include <cmath>
+
 #include "XPLMPlanes.h"
 
 #include "fmt/format.h"
@@ -13,7 +15,11 @@ namespace sc::sync {
 
 namespace {
 
-constexpr int kView3dCockpit = 1026;            // sim/graphics/view/view_type: the 3D cockpit
+constexpr int   kView3dCockpit = 1026;          // sim/graphics/view/view_type: the 3D cockpit
+constexpr float kSlideClose    = 0.01f;         // VR slide: close enough (m)
+constexpr float kSlideSlowDown = 0.25f;         // VR slide: the normal speed from here (m)
+constexpr float kStandingEyes  = 1.70f;         // a standing hotspot is the feet: the eyes above
+constexpr float kFacingOff     = 15.0f;         // VR: a seat facing further off straight ahead gets a notice (deg)
 
 } // namespace
 
@@ -28,17 +34,31 @@ SeatSync::SeatSync(net::SessionHub& hub) : mHub(hub)
     for (int i = 0; i < 6; ++i)
         mHead[i] = XPLMFindDataRef(head[i]);
     mCockpitView = XPLMFindCommand("sim/view/3d_cockpit_cmnd_look");
-    mBack     = XPLMCreateCommand("shared_cockpit/seat/back_to_my_seat", "Shared Cockpit: back to my seat (2D / 3D cockpit view)");
+    mBack     = XPLMCreateCommand("shared_cockpit/seat/back_to_my_seat", "Shared Cockpit: back to my seat (3D cockpit view; VR: slides there)");
     mNext     = XPLMCreateCommand("shared_cockpit/seat/next", "Shared Cockpit: the next seat");
     mPrevious = XPLMCreateCommand("shared_cockpit/seat/previous", "Shared Cockpit: the previous seat");
     for (XPLMCommandRef command : {mBack, mNext, mPrevious})
         if (command)
             XPLMRegisterCommandHandler(command, Command_cai, 1, this);
+    // VR slide: X-Plane's view-move commands (the arrow keys), and Reset VR view to stop one.
+    const char* move[3][2] = {{"right", "left"}, {"up", "down"}, {"backward", "forward"}};
+    for (int axis = 0; axis < 3; ++axis)
+        for (int dir = 0; dir < 2; ++dir) {
+            mMove[axis][dir][0] = XPLMFindCommand(fmt::format("sim/general/{}", move[axis][dir]).c_str());
+            mMove[axis][dir][1] = XPLMFindCommand(fmt::format("sim/general/{}_fast", move[axis][dir]).c_str());
+        }
+    mOutside = XPLMFindDataRef("sim/graphics/VR/teleport_on_ground");
+    mResetVr = XPLMFindCommand("sim/VR/general/reset_view");
+    if (mResetVr)
+        XPLMRegisterCommandHandler(mResetVr, ResetVr_cai, 1, this);
 }
 
 // Unregisters the commands.
 SeatSync::~SeatSync()
 {
+    StopSlide_cai(nullptr);
+    if (mResetVr)
+        XPLMUnregisterCommandHandler(mResetVr, ResetVr_cai, 1, this);
     for (XPLMCommandRef command : {mBack, mNext, mPrevious})
         if (command)
             XPLMUnregisterCommandHandler(command, Command_cai, 1, this);
@@ -57,6 +77,15 @@ int SeatSync::Command_cai(XPLMCommandRef command, XPLMCommandPhase phase, void* 
     else if (command == self->mPrevious)
         self->Step_cai(-1);
     return 0;
+}
+
+// Reset VR view: stops a slide; X-Plane still resets the view (1 = pass it on).
+int SeatSync::ResetVr_cai(XPLMCommandRef, XPLMCommandPhase phase, void* refcon)
+{
+    auto* self = static_cast<SeatSync*>(refcon);
+    if (phase == xplm_CommandBegin && self && self->mSliding)
+        self->StopSlide_cai("Reset VR view");
+    return 1;
 }
 
 // Reads the seats of `acfFile` and gives them to the session.
@@ -90,12 +119,23 @@ void SeatSync::Tick_cai()
     net::NetSession& session = mHub.Session_cai();
     if (session.TakeSeatsChanged_cai()) {
         mJumpFrames = 0;
+        StopSlide_cai("the seats changed");
         LOG_INFO("seats to pick from: {} ({})", session.SessionSeats_cai().size(), Source_cai());
+    }
+    if (mRequested) {                              // from a window (Connect page)
+        mRequested = false;
+        Pick_cai(mRequestPick);
+    }
+    if (mRequestBack) {
+        mRequestBack = false;
+        BackToSeat_cai();
     }
     if (mJumpFrames > 0) {
         --mJumpFrames;
         Jump_cai();
     }
+    if (mSliding)
+        TickSlide_cai();
 }
 
 // The seats to pick from.
@@ -133,7 +173,9 @@ void SeatSync::Pick_cai(std::uint8_t seat)
     if (session.MySeat_cai() == net::kNoSeat)
         return;
     LOG_INFO("seat: {}", Seats_cai()[session.MySeat_cai()].name);
+    mPicking = true;                                // a new seat: the window may follow (VR)
     BackToSeat_cai();
+    mPicking = false;
 }
 
 // Back to my seat.
@@ -146,8 +188,7 @@ void SeatSync::BackToSeat_cai()
         return;
     }
     if (InVr_cai()) {
-        mHub.Note_cai(net::SessionEvent::Kind::Notice,
-                      "In VR, use X-Plane's teleport to the seat (or leave VR, use Back to my seat, and return)");
+        StartSlide_cai();                           // VR: slide there (0.9.25)
         return;
     }
     if (mViewType && XPLMGetDatai(mViewType) != kView3dCockpit && mCockpitView)
@@ -180,6 +221,125 @@ void SeatSync::Jump_cai()
     for (int i = 0; i < 6; ++i)
         if (mHead[i])
             XPLMSetDataf(mHead[i], values[i]);
+}
+
+// The view-move command for `axis` in direction `sign` (+1 / -1).
+XPLMCommandRef SeatSync::MoveCommand_cai(int axis, int sign, bool fast) const
+{
+    XPLMCommandRef command = mMove[axis][sign > 0 ? 0 : 1][fast ? 1 : 0];
+    return command ? command : mMove[axis][sign > 0 ? 0 : 1][0];
+}
+
+// VR: starts sliding my view to my seat (all three axes at once).
+void SeatSync::StartSlide_cai()
+{
+    StopSlide_cai(nullptr);
+    const std::uint8_t seat = MySeat_cai();
+    if (seat >= Seats_cai().size() || !mHead[0] || !mHead[1] || !mHead[2])
+        return;
+    if (mOutside && XPLMGetDatai(mOutside) != 0) {
+        mHub.Note_cai(net::SessionEvent::Kind::Notice, "You are outside the aircraft: teleport back in first");
+        return;
+    }
+    const net::SeatInfo& s = Seats_cai()[seat];
+    mTarget[0] = s.x;
+    mTarget[1] = s.sitting ? s.y : s.y + kStandingEyes;
+    mTarget[2] = s.z;
+    bool any = false;
+    for (int axis = 0; axis < 3; ++axis) {
+        Axis& a = mAxis[axis];
+        const float d = mTarget[axis] - XPLMGetDataf(mHead[axis]);
+        a = Axis{};
+        if (std::fabs(d) <= kSlideClose)
+            continue;
+        a.sign = d > 0.0f ? 1 : -1;
+        a.fast = std::fabs(d) > kSlideSlowDown;
+        a.held = MoveCommand_cai(axis, a.sign, a.fast);
+        a.done = a.held == nullptr;
+        if (a.held) {
+            XPLMCommandBegin(a.held);
+            any = true;
+        }
+    }
+    if (!any) {
+        LOG_INFO("seat (VR): already at {}", s.name);
+        return;
+    }
+    mSliding = true;
+    mSlideBrings = mPicking;
+    mSlideUntil = Clock::now() + std::chrono::seconds(10);
+    LOG_INFO("seat (VR): sliding to {} ({:.2f}, {:.2f}, {:.2f})", s.name, mTarget[0], mTarget[1], mTarget[2]);
+}
+
+// VR: every flight loop of a slide: stops each axis once it reaches the seat, slows down near it.
+void SeatSync::TickSlide_cai()
+{
+    if (!InVr_cai()) {
+        StopSlide_cai("VR off");
+        return;
+    }
+    if (mOutside && XPLMGetDatai(mOutside) != 0) {
+        StopSlide_cai("teleported outside");
+        return;
+    }
+    if (Clock::now() > mSlideUntil) {
+        StopSlide_cai("did not reach the seat in 10 s");
+        mHub.Note_cai(net::SessionEvent::Kind::Notice, "The view did not reach the seat (VR): try again, or use X-Plane's teleport");
+        return;
+    }
+    bool all = true;
+    for (int axis = 0; axis < 3; ++axis) {
+        Axis& a = mAxis[axis];
+        if (a.done)
+            continue;
+        const float left = (mTarget[axis] - XPLMGetDataf(mHead[axis])) * static_cast<float>(a.sign);
+        if (left <= kSlideClose) {                  // there (or just past it)
+            XPLMCommandEnd(a.held);
+            a.held = nullptr;
+            a.done = true;
+            continue;
+        }
+        if (a.fast && left <= kSlideSlowDown) {     // near: the normal speed
+            XPLMCommandEnd(a.held);
+            a.fast = false;
+            a.held = MoveCommand_cai(axis, a.sign, false);
+            if (a.held)
+                XPLMCommandBegin(a.held);
+            else
+                a.done = true;
+        }
+        all = all && a.done;
+    }
+    if (all) {
+        mSliding = false;
+        const std::uint8_t seat = MySeat_cai();
+        if (seat >= Seats_cai().size())
+            return;
+        const net::SeatInfo& s = Seats_cai()[seat];
+        LOG_INFO("seat (VR): at {} ({:.2f}, {:.2f}, {:.2f})", s.name, XPLMGetDataf(mHead[0]), XPLMGetDataf(mHead[1]),
+                 XPLMGetDataf(mHead[2]));
+        // VR cannot turn the view: say where this seat faces (0.9.26).
+        const float facing = std::remainder(s.psi, 360.0f);            // -180..180, + = right
+        if (std::fabs(facing) > kFacingOff)
+            mHub.Note_cai(net::SessionEvent::Kind::Notice,
+                          fmt::format("{} faces {:.0f}\u00b0 {}: turn your head that way (X-Plane's teleport sets the exact heading)",
+                                      s.name, std::fabs(facing), facing > 0.0f ? "right" : "left"));
+        if (mOnVrArrived && mSlideBrings)
+            mOnVrArrived();
+    }
+}
+
+// VR: releases every held move command (`why`: for the log, nullptr = quietly).
+void SeatSync::StopSlide_cai(const char* why)
+{
+    for (Axis& a : mAxis) {
+        if (a.held)
+            XPLMCommandEnd(a.held);
+        a = Axis{};
+    }
+    if (mSliding && why)
+        LOG_INFO("seat (VR): slide stopped ({})", why);
+    mSliding = false;
 }
 
 } // namespace sc::sync

@@ -234,8 +234,15 @@ void NetSession::Close_cai(ByeReason reason)
     mPicLoad.reset();
     if (!mHostSeats.empty())
         mSeatsChanged = true;                         // back to my own seats
+    // My pick stays when it is one of my own seats (0.9.30: a seat picked alone carries into a session,
+    // and the seat stays when it ends); a pick among different host seats does not.
+    if (!mHostSeats.empty() && mHostSeats != mOwnSeats)
+        mOwnSeat = kNoSeat;
+    if (mOwnSeat >= mOwnSeats.size())
+        mOwnSeat = kNoSeat;
     mHostSeats.clear();
-    mOwnSeat = kNoSeat;
+    mHostLevers = 0;
+    mLeversIn.clear();
     mCopilotId = kNoId;
     mCommandsIn.clear();
     mRejections.clear();
@@ -540,6 +547,14 @@ void NetSession::HostOnReceived_cai(Link& link, const Message& message)
                         if (other.step == Link::Step::In && other.person.id != id)
                             Send_cai(other.link, out);
                 }
+            } else if (const auto* levers = std::get_if<MsgLevers>(&message)) {
+                if (link.person.levers != 0) {             // only what the host gave them counts
+                    const MsgLevers out{id, link.person.levers, levers->inputs};
+                    mLeversIn[id] = LeversIn{link.person.levers, levers->inputs, Clock::now()};
+                    for (const auto& [linkId, other] : mLinks)
+                        if (other.step == Link::Step::In && other.person.id != id)
+                            Send_cai(other.link, out, true, false);
+                }
             } else if (const auto* choice = std::get_if<MsgSeatChoice>(&message)) {
                 const std::uint8_t seat = choice->seat < mOwnSeats.size() ? choice->seat : kNoSeat;
                 if (link.person.seat != seat) {
@@ -662,6 +677,7 @@ void NetSession::HostRemove_cai(Link& link, const std::string& why)
     std::erase(mPriority, id);
     std::erase(mSnapshotRequests, id);
     mPositions.erase(id);
+    mLeversIn.erase(id);
     for (auto it = mLastValue.begin(); it != mLastValue.end();)
         it = it->second.author == id ? mLastValue.erase(it) : std::next(it);
     HostSendPriority_cai();
@@ -780,6 +796,12 @@ void NetSession::HostSetPic_cai(std::uint8_t newPic, const std::string& reason)
 {
     const std::uint8_t oldPic = mPic;
     mPic = newPic;
+    // The new PIC works every lever nobody else has: theirs go back to the PIC's hands.
+    if (newPic == kHostId)
+        mHostLevers = 0;
+    else if (Link* link = HostLinkById_cai(newPic))
+        link->person.levers = 0;
+    mLeversIn.erase(newPic);
     LOG_INFO("control: PIC '{}' -> '{}' ({})", NameOf_cai(oldPic), NameOf_cai(newPic), reason);
     mPending.clear();          // every open question was about the old PIC
     mQuestions.clear();
@@ -837,6 +859,7 @@ void NetSession::HostRebuildPeople_cai(bool send)
     host.master = true;
     host.pic = mPic == kHostId;
     host.seat = mOwnSeat;
+    host.levers = mPic == kHostId ? 0 : mHostLevers;
     people.push_back(host);
     for (const auto& [id, link] : mLinks) {
         if (link.step != Link::Step::In)
@@ -1020,12 +1043,22 @@ void NetSession::JoinOnReceived_cai(const Message& message)
     } else if (const auto* load = std::get_if<MsgLoad>(&message)) {
         if (load->id != mMyId)
             mLoadIn = load->load;
+    } else if (const auto* levers = std::get_if<MsgLevers>(&message)) {
+        if (levers->id != mMyId)
+            mLeversIn[levers->id] = LeversIn{levers->levers, levers->inputs, Clock::now()};
     } else if (const auto* seats = std::get_if<MsgSeats>(&message)) {
         if (seats->seats != mHostSeats) {
+            const bool first = mHostSeats.empty();
             mHostSeats = seats->seats;
-            mOwnSeat = kNoSeat;
+            // The same seats as mine (the same aircraft): a seat I picked alone carries in (0.9.30).
+            if (first && mOwnSeat < mHostSeats.size() && mHostSeats == mOwnSeats) {
+                Send_cai(mHostLink, MsgSeatChoice{kNoId, mOwnSeat});
+                LOG_INFO("the host's seats: {}; I keep {}", mHostSeats.size(), mHostSeats[mOwnSeat].name);
+            } else {
+                mOwnSeat = kNoSeat;
+                LOG_INFO("the host's seats: {}", mHostSeats.size());
+            }
             mSeatsChanged = true;
-            LOG_INFO("the host's seats: {}", mHostSeats.size());
         }
     } else if (const auto* copilot = std::get_if<MsgCopilotInputs>(&message)) {
         if (copilot->id != mMyId && mRules.copilotAxes)
@@ -1253,6 +1286,10 @@ bool NetSession::SetRole_cai(std::uint8_t id, Role role, std::string& why)
     if (!link) { why = "no such person"; return false; }
     if (link->person.role == role) { why = fmt::format("{} is already {}", link->person.name, RoleName_cai(role)); return false; }
     link->person.role = role;
+    if (role == Role::Observer) {
+        link->person.levers = 0;                    // observers touch nothing
+        mLeversIn.erase(id);
+    }
     LOG_INFO("seat: '{}' is now {}", link->person.name, RoleName_cai(role));
     const std::string text = fmt::format("{} is now {}", link->person.name, RoleName_cai(role));
     HostBroadcast_cai(MsgNotice{text});
@@ -1644,6 +1681,68 @@ void NetSession::SendLoad_cai(const LoadInfo& load)
     }
 }
 
+// The host gives a Crew member levers to work (one owner per lever).
+bool NetSession::SetLevers_cai(std::uint8_t id, std::uint16_t levers, std::string& why)
+{
+    if (!mIsHost || mState != SessionState::Hosting) { why = "only the master (the host) hands out levers"; return false; }
+    levers &= kLeverAll;
+    if (id == mPic && levers != 0) { why = "the PIC already works every lever nobody else has"; return false; }
+    Link* link = id == kHostId ? nullptr : HostLinkById_cai(id);
+    if (id != kHostId && !link) { why = "no such person"; return false; }
+    if (link && link->person.role == Role::Observer && levers != 0) { why = "observers cannot work levers - make them Crew first"; return false; }
+    // One owner per lever: the others lose these.
+    if (id != kHostId)
+        mHostLevers &= static_cast<std::uint16_t>(~levers);
+    for (auto& [linkId, other] : mLinks)
+        if (other.person.id != id)
+            other.person.levers &= static_cast<std::uint16_t>(~levers);
+    std::uint16_t& mine = link ? link->person.levers : mHostLevers;
+    if (mine == levers) { why = "no change"; return false; }
+    mine = levers;
+    mLeversIn.erase(id);
+    const std::string name = link ? link->person.name : mLocal.name;
+    LOG_INFO("levers: '{}' works {}", name, LeverNames_cai(levers));
+    const std::string text = levers ? fmt::format("{} works the {}", name, LeverNames_cai(levers))
+                                    : fmt::format("{}'s levers are back with the PIC", name);
+    HostBroadcast_cai(MsgNotice{text});
+    Event_cai(SessionEvent::Kind::Notice, text);
+    HostRebuildPeople_cai(true);
+    return true;
+}
+
+// The levers I work now.
+std::uint16_t NetSession::MyLevers_cai() const
+{
+    const Person* me = Find_cai(mMyId);
+    return me && !me->pic && me->role == Role::Crew ? me->levers : 0;
+}
+
+// The levers somebody else works.
+std::uint16_t NetSession::OthersLevers_cai() const
+{
+    std::uint16_t levers = 0;
+    for (const Person& p : mPeople)
+        if (p.id != mMyId && !p.pic)
+            levers |= p.levers;
+    return levers;
+}
+
+// A lever owner: my levers' positions to everybody.
+void NetSession::SendLevers_cai(const FlightInputs& inputs)
+{
+    const std::uint16_t levers = MyLevers_cai();
+    if (!Active_cai() || levers == 0)
+        return;
+    if (mIsHost) {
+        const MsgLevers out{kHostId, levers, inputs};
+        for (const auto& [linkId, link] : mLinks)
+            if (link.step == Link::Step::In)
+                Send_cai(link.link, out, true, false);
+    } else {
+        Send_cai(mHostLink, MsgLevers{kNoId, levers, inputs}, true, false);
+    }
+}
+
 // My aircraft's seats; hosting, everybody gets them (and their picks are cleared).
 void NetSession::SetOwnSeats_cai(const std::vector<SeatInfo>& seats)
 {
@@ -1688,6 +1787,9 @@ void NetSession::PickSeat_cai(std::uint8_t seat)
 // My pick.
 std::uint8_t NetSession::MySeat_cai() const
 {
+    // After a session with other host seats, until the next start: no pick among my own.
+    if (!Active_cai() && !mHostSeats.empty() && mHostSeats != mOwnSeats)
+        return kNoSeat;
     return mOwnSeat;
 }
 

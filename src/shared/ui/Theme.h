@@ -35,6 +35,8 @@ inline const ImVec4 kSaved         = {0.180f, 0.620f, 0.267f, 1.0f};   // saved 
 inline const ImVec4 kSavedText     = {0.118f, 0.478f, 0.200f, 1.0f};
 inline const ImVec4 kError         = {0.780f, 0.180f, 0.180f, 1.0f};
 inline const ImVec4 kErrorText     = {0.650f, 0.080f, 0.080f, 1.0f};
+inline const ImVec4 kWarnYellow    = {0.960f, 0.720f, 0.040f, 1.0f};   // the warning triangle (0.9.20)
+inline const ImVec4 kAqua          = {0.000f, 0.420f, 0.460f, 1.0f};   // my address / machine name (0.9.12): text, dark enough to read
 
 // Categories
 inline const ImVec4 kCatCommand    = kButton;

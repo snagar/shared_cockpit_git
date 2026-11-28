@@ -15,6 +15,8 @@ namespace sc::sync {
 
 namespace {
 
+constexpr std::uint16_t kWriteHands = 1u << 15;   // yoke, rudder, toe brakes: always the PIC's
+
 // The datarefs of the inputs (the cockpit's view of them; DatarefSync leaves these alone).
 constexpr std::string_view kOwned[] = {
     "sim/joystick/yoke_pitch_ratio", "sim/joystick/yoke_roll_ratio", "sim/joystick/yoke_heading_ratio",
@@ -186,7 +188,7 @@ void FlightInputs::Overrides_cai(bool on)
 {
     if (on == mOverridden)
         return;
-    XPLMDataRef refs[4] = {mRefs.overrideJoystick, mRefs.overrideToeBrakes, mRefs.throttleUse ? mRefs.overrideThrottles : nullptr,
+    XPLMDataRef refs[4] = {mRefs.overrideJoystick, mRefs.overrideToeBrakes, nullptr,   // throttles: ThrottleOverride_cai
                            mRefs.overridePropPitch};
     for (int i = 0; i < 4; ++i) {
         if (!refs[i])
@@ -200,28 +202,81 @@ void FlightInputs::Overrides_cai(bool on)
     }
     mOverridden = on;
     mHub.Flight_cai().hardwareOff = on;
-    LOG_INFO("flight inputs: my own yoke / pedals{}{} {}", refs[2] ? " / throttles" : "", refs[3] ? " / collective" : "",
+    LOG_INFO("flight inputs: my own yoke / pedals{} {}", refs[3] ? " / collective" : "",
              on ? "switched off (the PIC flies)" : "back on");
 }
 
+// The throttle override: on while somebody else's throttle is written here.
+void FlightInputs::ThrottleOverride_cai(bool on)
+{
+    if (!mRefs.overrideThrottles || !mRefs.throttleUse || on == mThrottleOverridden)
+        return;
+    if (on) {
+        mThrottleBefore = XPLMGetDatai(mRefs.overrideThrottles);
+        XPLMSetDatai(mRefs.overrideThrottles, 1);
+    } else {
+        XPLMSetDatai(mRefs.overrideThrottles, mThrottleBefore);
+    }
+    mThrottleOverridden = on;
+    LOG_INFO("flight inputs: my own throttles {}", on ? "switched off (the PIC or a Crew member works them)" : "back on");
+}
+
+// The positions of the levers other Crew members work, over `target`.
+void FlightInputs::OverlayOwners_cai(net::FlightInputs& target) const
+{
+    const net::NetSession& session = mHub.Session_cai();
+    for (const auto& [id, in] : session.LeversIn_cai()) {
+        const net::Person* owner = session.Find_cai(id);
+        if (!owner || owner->pic || id == session.MyId_cai())
+            continue;
+        const std::uint16_t levers = static_cast<std::uint16_t>(in.levers & owner->levers);   // what they still have
+        const net::FlightInputs& f = in.inputs;
+        if (levers & net::kLeverThrottle) { target.throttle = f.throttle; target.propMode = f.propMode; }
+        if (levers & net::kLeverProp) target.prop = f.prop;
+        if (levers & net::kLeverMixture) target.mixture = f.mixture;
+        if (levers & net::kLeverFlaps) target.flapRequest = f.flapRequest;
+        if (levers & net::kLeverSpeedbrake) target.speedbrake = f.speedbrake;
+        if (levers & net::kLeverTrims) {
+            target.trimElevator = f.trimElevator; target.trimAileron = f.trimAileron; target.trimRudder = f.trimRudder;
+        }
+        if (levers & net::kLeverParking) target.parkingBrake = f.parkingBrake;
+    }
+}
+
+// A lever owner: mine to everybody when changed (30 a second at most) or once a second.
+void FlightInputs::SendLevers_cai()
+{
+    const auto now = Clock::now();
+    if (now - mLeversSentAt < std::chrono::milliseconds(static_cast<int>(1000.0 / net::kFlightInputsRate)))
+        return;
+    const net::FlightInputs in = Read_cai();
+    if (!Differs_cai(in, mLeversSent) && now - mLeversSentAt < std::chrono::seconds(1))
+        return;
+    mHub.Session_cai().SendLevers_cai(in);
+    mLeversSent = in;
+    mLeversSentAt = now;
+}
+
 // A follower: writes the PIC's inputs.
-void FlightInputs::Write_cai(const net::FlightInputs& in)
+void FlightInputs::Write_cai(const net::FlightInputs& in, std::uint16_t what)
 {
     const Refs& r = mRefs;
-    if (r.yokePitch) XPLMSetDataf(r.yokePitch, in.yokePitch);
-    if (r.yokeRoll) XPLMSetDataf(r.yokeRoll, in.yokeRoll);
-    if (r.yokeHeading) XPLMSetDataf(r.yokeHeading, in.yokeHeading);
-    if (r.brakeLeft) XPLMSetDataf(r.brakeLeft, in.brakeLeft);
-    if (r.brakeRight) XPLMSetDataf(r.brakeRight, in.brakeRight);
-    if (r.parking) XPLMSetDataf(r.parking, in.parkingBrake);
-    if (r.speedbrake) XPLMSetDataf(r.speedbrake, in.speedbrake);
-    if (r.flapRequest) XPLMSetDataf(r.flapRequest, in.flapRequest);
+    if (what & kWriteHands) {
+        if (r.yokePitch) XPLMSetDataf(r.yokePitch, in.yokePitch);
+        if (r.yokeRoll) XPLMSetDataf(r.yokeRoll, in.yokeRoll);
+        if (r.yokeHeading) XPLMSetDataf(r.yokeHeading, in.yokeHeading);
+        if (r.brakeLeft) XPLMSetDataf(r.brakeLeft, in.brakeLeft);
+        if (r.brakeRight) XPLMSetDataf(r.brakeRight, in.brakeRight);
+    }
+    if (r.parking && (what & net::kLeverParking)) XPLMSetDataf(r.parking, in.parkingBrake);
+    if (r.speedbrake && (what & net::kLeverSpeedbrake)) XPLMSetDataf(r.speedbrake, in.speedbrake);
+    if (r.flapRequest && (what & net::kLeverFlaps)) XPLMSetDataf(r.flapRequest, in.flapRequest);
     // Trims: a hardware trim wheel moving them back is counted like a lever.
     XPLMDataRef trims[3] = {r.trimElevator, r.trimAileron, r.trimRudder};
     const float trimValues[3] = {in.trimElevator, in.trimAileron, in.trimRudder};
     bool trimMoved = false;
     for (int k = 0; k < 3; ++k) {
-        if (!trims[k])
+        if (!trims[k] || !(what & net::kLeverTrims))
             continue;
         trimMoved = trimMoved || (mTrimWritten && std::fabs(XPLMGetDataf(trims[k]) - mTrim[k]) > kHeldTolerance);
         XPLMSetDataf(trims[k], trimValues[k]);
@@ -229,7 +284,7 @@ void FlightInputs::Write_cai(const net::FlightInputs& in)
     }
     mTrimWritten = true;
     mHeld += trimMoved ? 1 : 0;
-    if (r.propMode && !in.propMode.empty()) {
+    if (r.propMode && !in.propMode.empty() && (what & net::kLeverThrottle)) {
         // Reverse / beta: only when it differs (writing the mode is a request, not every frame).
         const int n = std::min(Engines_cai(), static_cast<int>(in.propMode.size()));
         std::array<int, net::kMaxEngines> now{};
@@ -244,9 +299,12 @@ void FlightInputs::Write_cai(const net::FlightInputs& in)
     // Count the frames where my hardware moved a lever away from what was written last frame.
     XPLMDataRef levers[3] = {r.throttle, r.prop, r.mixture};
     const std::vector<float>* values[3] = {&in.throttle, &in.prop, &in.mixture};
+    const std::uint16_t bits[3] = {net::kLeverThrottle, net::kLeverProp, net::kLeverMixture};
     for (int k = 0; k < 3; ++k) {
-        if (!levers[k] || values[k]->empty())
+        if (!levers[k] || values[k]->empty() || !(what & bits[k])) {
+            mWritten[k].clear();
             continue;
+        }
         const std::vector<float> now = ReadArray_cai(levers[k], engines);
         bool moved = false;
         for (std::size_t i = 0; i < mWritten[k].size() && i < now.size(); ++i)
@@ -257,7 +315,7 @@ void FlightInputs::Write_cai(const net::FlightInputs& in)
         XPLMSetDatavf(levers[k], out.data(), 0, n);
         mWritten[k].assign(out.begin(), out.begin() + n);
     }
-    if (r.throttleUse && mOverridden && !in.throttle.empty()) {
+    if (r.throttleUse && mThrottleOverridden && !in.throttle.empty() && (what & net::kLeverThrottle)) {
         std::vector<float> out = in.throttle;
         XPLMSetDatavf(r.throttleUse, out.data(), 0, std::min(engines, static_cast<int>(out.size())));
     }
@@ -365,11 +423,23 @@ void FlightInputs::Tick_cai(bool iAmPic)
     net::FlightStats& stats = mHub.Flight_cai();
     stats.engines = static_cast<std::size_t>(Engines_cai());
     TickCopilot_cai(iAmPic);
+    const net::NetSession& session = mHub.Session_cai();
+    const std::uint16_t mine = session.MyLevers_cai();      // levers my hands work (Crew)
+    const std::uint16_t others = session.OthersLevers_cai(); // levers other Crew members work
     if (iAmPic) {
         TickBlend_cai();
         Send_cai();
+        // Levers a Crew member works: written here from them (my hardware's are held).
+        if (others != 0) {
+            net::FlightInputs target = Read_cai();
+            OverlayOwners_cai(target);
+            Write_cai(target, others);
+        }
+        ThrottleOverride_cai((others & net::kLeverThrottle) != 0);
         return;
     }
+    if (mine != 0)
+        SendLevers_cai();
     if (auto in = mHub.Session_cai().TakeFlightInputs_cai()) {
         mLast = std::move(*in);
         stats.inputsAt = Clock::now();
@@ -377,7 +447,10 @@ void FlightInputs::Tick_cai(bool iAmPic)
     if (!mLast)
         return;                                       // nothing from the PIC yet: my hardware stays mine
     Overrides_cai(true);
-    Write_cai(*mLast);
+    ThrottleOverride_cai((mine & net::kLeverThrottle) == 0);
+    net::FlightInputs target = *mLast;
+    OverlayOwners_cai(target);
+    Write_cai(target, static_cast<std::uint16_t>(kWriteHands | (net::kLeverAll & ~mine)));
     const auto now = Clock::now();
     if (now - mHeldSince >= std::chrono::seconds(1)) {
         if (mHeld > 0 && stats.heldPerSecond == 0)
@@ -456,6 +529,7 @@ void FlightInputs::Stop_cai()
 {
     EndBlend_cai("stopped");
     Overrides_cai(false);
+    ThrottleOverride_cai(false);
     CopilotOverrides_cai(false);
     mCopLast.reset();
     mLast.reset();

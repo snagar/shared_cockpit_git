@@ -21,4 +21,8 @@ struct LocalAddress {
 // The IPv4 addresses of the adapters that are up (loopback left out), LAN first.
 std::vector<LocalAddress> LocalAddresses_cai();
 
+// This computer's name ("saar-pc"; empty when unknown). Others may join with it where the network
+// resolves names (most home LANs: the name, or name.local on macOS / Linux; Tailscale MagicDNS).
+std::string MachineName_cai();
+
 } // namespace sc::net

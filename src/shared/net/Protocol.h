@@ -15,7 +15,7 @@ namespace sc::net {
 // --- Message header: 'S' 'C' <protocol> <type> ------------------------------------------
 inline constexpr std::uint8_t kMagic0          = 'S';
 inline constexpr std::uint8_t kMagic1          = 'C';
-inline constexpr std::uint8_t kProtocolVersion = 10;  // 2: commands (0.4), 3: datarefs, priority (0.5), 4: position, weather (0.6), 5: rules (0.7), 6: flight inputs, pause (0.8), 7: copilot axes (0.8.3), 8: follow, load (0.9), 9: handover blend (0.9.1), 10: seats (0.9.6)
+inline constexpr std::uint8_t kProtocolVersion = 11;  // 2: commands (0.4), 3: datarefs, priority (0.5), 4: position, weather (0.6), 5: rules (0.7), 6: flight inputs, pause (0.8), 7: copilot axes (0.8.3), 8: follow, load (0.9), 9: handover blend (0.9.1), 10: seats (0.9.6), 11: crew levers, 25 s answers (0.9.12)
 inline constexpr std::size_t  kHeaderSize      = 4;
 
 // --- Connections ---------------------------------------------------------------------
@@ -31,7 +31,7 @@ inline constexpr std::uint8_t kChannelUnreliable = 1;   // later: the position s
 // --- Timeouts (seconds) ----------------------------------------------------------------
 inline constexpr double kConnectTimeout   = 10.0;   // ENet connect until the host answers
 inline constexpr double kHandshakeTimeout = 5.0;    // connected until Welcome / Refused
-inline constexpr double kRequestTimeout   = 15.0;   // a control request / offer not answered
+inline constexpr double kRequestTimeout   = 25.0;   // a control request / offer not answered (0.9.12: was 15)
 inline constexpr double kPeopleInterval   = 2.0;    // the host re-sends People (pings)
 inline constexpr double kProfileTimeout   = 15.0;   // Welcome until ProfileAck (the profile can be large)
 inline constexpr std::uint32_t kPeerTimeoutMinMs = 5000;   // ENet: a silent peer is lost after 5..8 s
@@ -75,6 +75,8 @@ enum class MsgType : std::uint8_t {
     Load           = 30,    // the PIC's fuel and payload (protocol 8)
     Seats          = 31,    // the host's seats (its aircraft's vrconfig hotspots), host -> everybody (protocol 10)
     SeatChoice     = 32,    // a joiner picked a seat, joiner -> host (protocol 10)
+    Levers         = 33,    // the levers a Crew member works (their hands), -> host -> everybody (protocol 11)
+    SetLevers      = 34,    // reserved
 };
 
 // How often everybody sends its position, and the host its weather (seconds).
@@ -86,7 +88,21 @@ inline constexpr double kFlightStateRate  = 30.0;  // the PIC's aircraft state a
 inline constexpr double kFollowMaxM       = 20000.0; // Follow: farther from the PIC than this, "Move to PIC" (a new flight) first
 inline constexpr int    kMaxLoadValues    = 32;
 inline constexpr int    kMaxSeats         = 16;    // seats sent at most
-inline constexpr std::uint8_t kNoSeat     = 0xFF;  // Person::seat: none picked    // fuel tanks / payload stations sent at most
+inline constexpr std::uint8_t kNoSeat     = 0xFF;  // Person::seat: none picked
+
+// Levers the host can give to a Crew member (protocol 11): they work them, everybody follows.
+// The yoke, rudder and toe brakes always stay with the PIC.
+enum LeverBits : std::uint16_t {
+    kLeverThrottle   = 1u << 0,    // throttles (and reverse / beta)
+    kLeverProp       = 1u << 1,    // prop levers (a helicopter's collective)
+    kLeverMixture    = 1u << 2,
+    kLeverFlaps      = 1u << 3,
+    kLeverSpeedbrake = 1u << 4,
+    kLeverTrims      = 1u << 5,    // elevator / aileron / rudder trim
+    kLeverParking    = 1u << 6,    // parking brake
+    kLeverAll        = 0x7F,
+};
+inline constexpr int kLeverCount = 7;    // fuel tanks / payload stations sent at most
 inline constexpr double kWeatherMinGap    = 10.0;   // a weather change is sent at once, but not more often than this
 
 // The most values in one message (a snapshot is sent in parts of this size).

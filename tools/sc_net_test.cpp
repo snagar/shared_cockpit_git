@@ -1777,6 +1777,42 @@ public:
             Check_cai("a seat that does not exist is no seat", bob.MySeat_cai() == kNoSeat, "");
         }
 
+        // 12i. Crew levers (protocol 11): the host gives a Crew member the throttle and flaps.
+        {
+            NetSession& crew = host.PicId_cai() == bob.MyId_cai() ? cid : bob;
+            NetSession& other = &crew == &bob ? cid : bob;
+            std::string leverWhy;
+            host.SetRole_cai(crew.MyId_cai(), Role::Crew, leverWhy);
+            host.SetRole_cai(other.MyId_cai(), Role::Crew, leverWhy);
+            auto lmbda_leversOf = [](const NetSession& who, std::uint8_t id) {
+                const Person* p = who.Find_cai(id);
+                return p ? p->levers : static_cast<std::uint16_t>(0xFFFF);
+            };
+            const std::uint16_t given = kLeverThrottle | kLeverFlaps;
+            Check_cai("the host gives a Crew member the throttle and flaps", host.SetLevers_cai(crew.MyId_cai(), given, leverWhy), leverWhy);
+            lmbda_pump(3, [&] { return crew.MyLevers_cai() == given && lmbda_leversOf(other, crew.MyId_cai()) == given; });
+            Check_cai("everybody sees who works which lever", crew.MyLevers_cai() == given && lmbda_leversOf(other, crew.MyId_cai()) == given &&
+                      (other.OthersLevers_cai() & given) == given, "");
+            FlightInputs mine;
+            mine.flapRequest = 0.5f;
+            mine.throttle = {0.8f};
+            crew.SendLevers_cai(mine);
+            lmbda_pump(3, [&] { return other.LeversIn_cai().count(crew.MyId_cai()) > 0; });
+            const auto it = other.LeversIn_cai().find(crew.MyId_cai());
+            Check_cai("their lever positions reach the others", it != other.LeversIn_cai().end() && it->second.inputs.flapRequest == 0.5f &&
+                      it->second.levers == given && host.LeversIn_cai().count(crew.MyId_cai()) > 0, "");
+            Check_cai("the PIC cannot be given levers", !host.SetLevers_cai(host.PicId_cai(), kLeverFlaps, leverWhy), leverWhy);
+            Check_cai("one owner per lever: giving the flaps to another takes them from the first",
+                      host.SetLevers_cai(host.PicId_cai() == kHostId ? other.MyId_cai() : kHostId, kLeverFlaps, leverWhy), leverWhy);
+            lmbda_pump(3, [&] { return crew.MyLevers_cai() == kLeverThrottle; });
+            Check_cai("…and the first keeps the throttle", crew.MyLevers_cai() == kLeverThrottle, "");
+            host.SetLevers_cai(kHostId, 0, leverWhy);
+            host.SetLevers_cai(other.MyId_cai(), 0, leverWhy);
+            host.SetLevers_cai(crew.MyId_cai(), 0, leverWhy);
+            lmbda_pump(3, [&] { return crew.MyLevers_cai() == 0; });
+            Check_cai("levers back with the PIC", crew.MyLevers_cai() == 0 && other.OthersLevers_cai() == 0, "");
+        }
+
         // 13. The host ends the session.
         host.Leave_cai();
         lmbda_pump(4, lmbda_ended(bob));

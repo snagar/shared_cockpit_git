@@ -11,7 +11,7 @@ systems. Most of what follows comes from that.
 > **The one exception is the opt-in "copilot axes" (section 4b): it puts one copilot's stick and
 > pedals on X-Plane's copilot side - with real risks, read them first.**
 
-This page is for version **0.9.11** (network protocol **10**). Everybody in a session needs the same
+This page is for version **0.9.31** (network protocol **11**). Everybody in a session needs the same
 protocol - the About box shows it.
 
 ---
@@ -22,7 +22,7 @@ protocol - the About box shows it.
 |---|---|
 | **X-Plane** | X-Plane 12. Moving to a far-away PIC (another airport) needs **12.4 or newer** (`XPLMInitFlight`); nearby moves work on any 12. |
 | **Same aircraft** | Everybody loads the **same `.acf`** (same file name). The same version of it is best: a different version is a warning, not a block (controls may be missing). |
-| **Same plugin** | The same Shared Cockpit protocol (0.9.11 = 10). Older versions are refused with a clear message. |
+| **Same plugin** | The same Shared Cockpit protocol (0.9.31 = 11). Older versions are refused with a clear message. |
 | **Analysis** | The host needs a saved analysis of the aircraft (Home, step 1). Joiners use the host's, in memory - their own file is not changed. |
 | **Network** | UDP, port **39100** by default. LAN: nothing to do. Internet: ZeroTier or Tailscale (no router changes), or forward the UDP port on the host's router. |
 | **People** | Up to **4**: the host and 3 joiners. |
@@ -221,6 +221,19 @@ use it. Leave copilot axes off unless both of you want to fly together.
   `shared_cockpit_trace.csv` (10 rows a second while in a session): position, the inputs, the control
   deflections, nosewheel angle, brakes, throttle, RPM, and with Follow how far the aircraft was from
   the PIC's and how late its state was. Send the traces of both X-Planes to compare.
+* **Crew levers (0.9.12):** the host can give a Crew member levers to work: throttle, prop, mixture,
+  flaps, speed brake, trims, parking brake (Connect page, the sliders button in their row; changes
+  apply at once, also in flight). They move them with their own hardware or mouse and everybody, the
+  PIC too, follows. One owner per lever; the yoke, rudder and toe brakes always stay with the PIC;
+  becoming the PIC gives a person's levers back. Not yet: a helicopter's collective for a Crew member.
+* **Answering control offers / requests (0.9.12):** 25 s (was 15). The question pulses (Connect page,
+  Flight deck, its light) and chimes. "You have control" pulses for 3 s after a handover.
+* **Alerts (0.9.12):** Session settings (the gear) > Alerts (this computer only): Pulse questions, Chimes (a question, you have control, a message someone wrote,
+  following stopped), volume, a test button. Chimes need X-Plane 12 (its plugin sound); our own tones.
+* **Your network info (0.9.19):** under the Connect page's top bar, the same place in every state:
+  "Name: …, IP: … (LAN)" in a purple box, a Refresh icon and a help marker. A click on the name or an
+  address copies it ("Copied" shows for 2 s). Copying: Windows and macOS built in; Linux needs
+  wl-copy, xclip or xsel installed (otherwise the label says so). Also in About.
 * **Seats (0.9.6):** the seats are the teleport hotspots of the host's aircraft's vrconfig file
   (`<aircraft>_vrconfig.txt`); the host sends them to everybody (in memory, no file written). Pick yours
   on the Flight deck (the seat list); the 3D cockpit view jumps there. "Back to my seat" (button, or the command

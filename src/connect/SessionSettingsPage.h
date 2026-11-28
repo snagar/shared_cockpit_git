@@ -38,6 +38,8 @@ private:
     void ui_joiners_cai(bool editable);
     // The copilot axes risks: true when "Turn on, I understand" was pressed.
     bool ui_popup_copilot_cai();
+    // Alerts (pulse, chimes): this computer's own, always editable (0.9.12).
+    void ui_alerts_cai();
     // Saves and, while hosting, sends.
     void Apply_cai(const net::SessionRules& rules);
 
@@ -48,3 +50,4 @@ private:
 };
 
 } // namespace sc::pages
+

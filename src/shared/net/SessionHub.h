@@ -120,6 +120,11 @@ public:
     // Adds a line, or - when the last line has the same `merge` key and is less than 3 s old -
     // counts it there ("Bob: HDG UP x 5"), so a turned knob is one line.
     void NoteMerged_cai(SessionEvent::Kind kind, std::string text, const std::string& merge);
+    // True for a message someone wrote ("Bob: ready?"), not a session notice (levers, roles, joins).
+    bool IsMessage_cai(const std::string& text) const;
+    // How many questions / messages from the others arrived so far (the chimes watch these).
+    std::uint32_t QuestionCount_cai() const { return mQuestionCount; }
+    std::uint32_t NoticeCount_cai() const { return mNoticeCount; }
     // Counts one shared change (sent or run here) for SyncStats::perMinute.
     void CountChange_cai();
     // Ends the session with a reason shown in the feed.
@@ -145,6 +150,7 @@ private:
     PositionStats        mPosition;
     FlightStats          mFlight;
     std::deque<std::chrono::steady_clock::time_point> mRecentChanges;   // the last minute's changes
+    std::uint32_t mQuestionCount = 0, mNoticeCount = 0;
     std::deque<FeedLine> mFeed;
     std::size_t          mFeedRevision = 0;
     std::size_t          mChangeRevision = 0;

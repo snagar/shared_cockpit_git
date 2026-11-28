@@ -145,3 +145,9 @@ The log's Debug lines show who sent what (and the full dataref name).
   (`analysis/VrSeats`), re-read when the aircraft or the file changes; the host's go to everybody.
   Picking one writes `sim/graphics/view/pilots_head_x/y/z/psi/the/phi` in the 3D cockpit view
   (switching to it first; applied for 3 frames). Not in VR. Commands: back_to_my_seat, next, previous.
+
+* **Crew levers** (`FlightInputs`, 0.9.12): an owner's X-Plane leaves its levers to their hands and
+  sends them (`SendLevers_cai`); everybody else - the PIC too - writes them over the PIC's inputs
+  (`OverlayOwners_cai`, `Write_cai` with a mask). The throttle override follows who works it.
+* **Chimes** (`Chimes`, 0.9.12): generated tones on X-Plane 12's UI bus (XPLMPlayPCMOnBus via
+  XPLMFindSymbol) for a question, you have control, a message, following stopped.

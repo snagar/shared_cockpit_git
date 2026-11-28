@@ -16,6 +16,7 @@
 #include <net/if.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
+#include <unistd.h>
 #endif
 
 #include "shared/log/Log.h"
@@ -124,6 +125,23 @@ std::vector<LocalAddress> LocalAddresses_cai()
         text += fmt::format("{}{} ({}, {})", text.empty() ? "" : ", ", a.ip, a.kind, a.adapter);
     LOG_DEBUG("local addresses: {}", text.empty() ? std::string("none") : text);
     return out;
+}
+
+// This computer's name.
+std::string MachineName_cai()
+{
+#ifdef _WIN32
+    char name[MAX_COMPUTERNAME_LENGTH + 1] = {};
+    DWORD size = sizeof(name);
+    if (GetComputerNameA(name, &size))
+        return std::string(name, size);
+    return {};
+#else
+    char name[256] = {};
+    if (gethostname(name, sizeof(name) - 1) != 0)
+        return {};
+    return name;
+#endif
 }
 
 } // namespace sc::net

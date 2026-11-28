@@ -13,6 +13,8 @@
 
 #pragma once
 
+#include <chrono>
+
 #include <functional>
 
 #include "ImgWindow.h"
@@ -80,6 +82,8 @@ private:
     bool mSizePressed = false;
     bool mClosePressed = false;
     int  mSeatPick = -1;
+    std::uint8_t mPicSeen = 0xFF;                    // the PIC last frame ("you have control")
+    std::chrono::steady_clock::time_point mPicSince{};
     bool mSeatBack = false;
     const sync::SeatSync* mSeats = nullptr;
 };

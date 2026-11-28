@@ -64,6 +64,19 @@ struct FlightDeckSettings {
 //   copilot_axes=0               ; 1: one Crew member's stick / pedals on X-Plane's copilot side (opt-in, risks)
 // 0.5 / 0.6 wrote [sharing] rate and [position] ground_m, air_m, heading_deg, weather: still read once.
 
+// Getting attention (personal, 0.9.12).
+//   [alerts]
+//   pulse=1                      ; questions and "you have control" pulse (0: steady colours)
+//   chimes=1                     ; a chime for questions, control, messages, a lost PIC (X-Plane 12)
+//   volume=70                    ; chime volume, % (0..100)
+//   vr_window_follows=1          ; VR: the window comes to me after a seat change (0.9.26)
+struct AlertSettings {
+    bool pulse = true;
+    bool chimes = true;
+    int  volume = 70;
+    bool vrWindowFollows = true;
+};
+
 // Debugging helps (personal, not session rules).
 //   [debug]
 //   flight_trace=0               ; 1: shared_cockpit_trace.csv, 10 rows a second while in a session
@@ -88,6 +101,7 @@ public:
     FlightDeckSettings flightDeck;
     net::SessionRules  rules;
     DebugSettings      debug;
+    AlertSettings      alerts;
 
 private:
     std::filesystem::path mFile;

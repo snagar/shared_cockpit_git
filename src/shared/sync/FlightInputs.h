@@ -31,6 +31,10 @@
 // plugin writes the old PIC's yoke and rudder moving to my hardware's - read from
 // sim/joystick/joy_mapped_axis_value (pitch 1, roll 2, yaw 3; -1..1 like yoke_*_ratio) - then my
 // joystick is mine. 0.9.2: no probe frame (it read stale values). Throttle and brakes: at once.
+// Crew levers (0.9.12, protocol 11): the host can give a Crew member levers (throttle, prop,
+// mixture, flaps, speed brake, trims, parking brake; never the yoke, rudder or toe brakes). Their
+// X-Plane leaves those to their own hands and mouse and sends them (Levers, 30 a second at most
+// while they change); every other X-Plane - the PIC's too - writes them from that owner.
 // These datarefs are not shared by DatarefSync (OwnsDataref_cai) - only from the PIC's hands.
 // The aircraft still drift apart a little (separate flight models): "Move to PIC".
 
@@ -96,10 +100,16 @@ private:
     net::FlightInputs Read_cai() const;
     // The PIC: sends when changed (30 a second at most) or once a second.
     void Send_cai();
-    // A follower: writes the PIC's inputs (every frame).
-    void Write_cai(const net::FlightInputs& inputs);
-    // A follower: my own hardware off (true) or back on (false).
+    // Writes `inputs` (every frame): only the parts in `what` (kWriteHands and LeverBits).
+    void Write_cai(const net::FlightInputs& inputs, std::uint16_t what);
+    // The positions of the levers other Crew members work, over `target`.
+    void OverlayOwners_cai(net::FlightInputs& target) const;
+    // A lever owner: sends mine when changed (30 a second at most) or once a second.
+    void SendLevers_cai();
+    // A follower: my own yoke / pedals off (true) or back on (false).
     void Overrides_cai(bool on);
+    // The throttle override: on while somebody else's throttle is written here.
+    void ThrottleOverride_cai(bool on);
     // Copilot axes: sends mine (the copilot) or writes the copilot's (everybody else).
     void TickCopilot_cai(bool iAmPic);
     // The copilot side's overrides on (the plugin writes it) or off (X-Plane's copilot axes).
@@ -116,6 +126,10 @@ private:
     bool                      mFound = false;
     bool                      mOverridden = false;
     int                       mBefore[4] = {0, 0, 0, 0};    // the overrides before I switched them on
+    bool                      mThrottleOverridden = false;
+    int                       mThrottleBefore = 0;
+    net::FlightInputs         mLeversSent;                  // a lever owner: what went out last
+    Clock::time_point         mLeversSentAt;
     std::optional<net::FlightInputs> mLast;                 // a follower: the PIC's newest inputs
     net::FlightInputs         mSent;                        // the PIC: what went out last
     Clock::time_point         mSentAt;

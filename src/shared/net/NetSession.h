@@ -256,6 +256,19 @@ public:
     std::uint8_t MySeat_cai() const;
     // True once after the session's seats changed.
     bool TakeSeatsChanged_cai();
+    // Crew levers (0.9.12, protocol 11). The host gives a Crew member levers (LeverBits) to work:
+    // their hands move them and everybody, the PIC too, follows. One owner per lever; the PIC and
+    // Observers own none (the PIC works every lever nobody else has). The host only.
+    bool SetLevers_cai(std::uint8_t id, std::uint16_t levers, std::string& why);
+    // The levers I work now (0: none).
+    std::uint16_t MyLevers_cai() const;
+    // The levers somebody else works (all of them OR'ed; the PIC's own levers are never here).
+    std::uint16_t OthersLevers_cai() const;
+    // A lever owner: my levers' positions to everybody.
+    void SendLevers_cai(const FlightInputs& inputs);
+    struct LeversIn { std::uint16_t levers = 0; FlightInputs inputs; std::chrono::steady_clock::time_point at; };
+    // The newest lever positions of each owner (id -> theirs).
+    const std::map<std::uint8_t, LeversIn>& LeversIn_cai() const { return mLeversIn; }
     // About how long the PIC's packets take to reach me, ms (from the pings).
     double PicDelayMs_cai() const;
     // Copilot axes (session rule): my stick / yoke / pedals as X-Plane's copilot side, to everybody.
@@ -407,6 +420,8 @@ private:
     std::vector<SeatInfo>      mHostSeats;                          // a joiner: the host's
     std::uint8_t               mOwnSeat = kNoSeat;                  // my pick
     bool                       mSeatsChanged = false;
+    std::uint16_t              mHostLevers = 0;                     // the host's levers (as Crew)
+    std::map<std::uint8_t, LeversIn> mLeversIn;                     // each owner's newest lever positions
     std::optional<CopilotIn>   mCopilotIn;                          // the copilot's newest inputs
     std::uint8_t               mCopilotId = kNoId;                  // host: who has the copilot seat
     Clock::time_point          mCopilotAt;                          // host: when that one last sent

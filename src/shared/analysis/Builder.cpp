@@ -119,13 +119,13 @@ SystemGrade GradeSystem_cai(std::string_view system, const RefCount& refs, bool 
     } else if (refs.custom == 0) {
         grade.grade  = Grade::Full;
         grade.reason = std::string(what);
-    } else if (refs.custom * 2 <= total || system == "switches" || !hasPlugins) {
-        grade.grade  = Grade::Mostly;
-        grade.reason = fmt::format("{} of its {} commands / datarefs are custom to this aircraft (not X-Plane's sim/...)", refs.custom, total);
     } else {
-        grade.grade  = Grade::Check;
-        grade.reason = fmt::format("Run by the aircraft plugin: {} of its {} commands / datarefs are custom to this aircraft",
-                                   refs.custom, total);
+        // Custom commands / datarefs are the aircraft's own controls, exposed to us: they usually share well
+        // (0.9.31: no longer "Check in sim" when most are custom). Read-only ones only show in a session.
+        grade.grade  = Grade::Mostly;
+        grade.reason = fmt::format("Custom to this aircraft: {} of {} commands / datarefs{}. They usually share well; any "
+                                   "read-only ones show on the Connect page in a session",
+                                   refs.custom, total, hasPlugins ? " (run by its plugin)" : "");
     }
     return grade;
 }
@@ -241,7 +241,8 @@ void GradeAnalysis_cai(AnalysisData& data)
     std::vector<std::string> weak;
     bool poor = false;
     for (const SystemGrade& system : grades.systems) {
-        if (system.grade == Grade::Full || system.grade == Grade::Mostly)
+        // "Check in sim" here means nothing of it was found to share (no FMS, say): not a weak point (0.9.31).
+        if (system.grade == Grade::Full || system.grade == Grade::Mostly || system.grade == Grade::Check)
             continue;
         weak.push_back(SystemLabel_cai(system.system));
         if (system.grade == Grade::None && (system.system == "switches" || system.system == "engines"))

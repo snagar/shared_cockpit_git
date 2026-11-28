@@ -15,7 +15,7 @@ namespace sc::info {
 
 // --- The plugin --------------------------------------------------------------------
 inline constexpr std::string_view kVersion      = "0.9";     // change before a release
-inline constexpr std::string_view kBuild        = "11";       // iteration, the zip is shared_cockpit_<version>.<build>.zip
+inline constexpr std::string_view kBuild        = "31";       // iteration, the zip is shared_cockpit_<version>.<build>.zip
 inline constexpr std::string_view kPluginId     = "shared_cockpit";   // must match project() in CMakeLists.txt
 inline constexpr std::string_view kPluginName   = "Shared Cockpit";
 inline constexpr std::string_view kPluginDesc   = "Shares one cockpit between two X-Plane simulators";
@@ -23,6 +23,11 @@ inline constexpr std::string_view kMenuToggle   = "Toggle Window";
 inline constexpr std::string_view kCmdToggle    = "shared_cockpit/toggle_main_window";
 inline constexpr std::string_view kCmdToggleDesc = "Shared Cockpit: show/hide the window";
 inline constexpr std::string_view kMenuToggleDeck    = "Toggle Flight Deck (2D)";
+inline constexpr std::string_view kCmdBringWindow     = "shared_cockpit/vr/bring_window_to_me";
+inline constexpr std::string_view kCmdBringWindowDesc = "Shared Cockpit: bring the window in front of me (VR; opens it when closed)";
+inline constexpr std::string_view kMenuToggleSeats    = "Toggle Seats window";
+inline constexpr std::string_view kCmdToggleSeats     = "shared_cockpit/toggle_seats_window";
+inline constexpr std::string_view kCmdToggleSeatsDesc = "Shared Cockpit: show/hide the small Seats window (2D and VR)";
 inline constexpr std::string_view kCmdToggleDeck     = "shared_cockpit/toggle_flight_deck";
 inline constexpr std::string_view kCmdToggleDeckDesc = "Shared Cockpit: show/hide the small flight deck window (2D)";
 
@@ -30,6 +35,9 @@ inline constexpr std::string_view kCmdToggleDeckDesc = "Shared Cockpit: show/hid
 inline constexpr std::string_view kDesignedBy   = "Snagar.Dev";
 inline constexpr std::string_view kCodedBy      = "Claude.Ai";
 inline constexpr std::string_view kLicense      = "Free";
+// The Donate buttons (0.9.23): Snagar.Dev's donation pages (Ko-fi 0.9.24).
+inline constexpr std::string_view kDonatePayPal = "https://www.paypal.com/donate/?hosted_button_id=7PLEBGEGTQUXY";
+inline constexpr std::string_view kDonateKofi   = "https://ko-fi.com/snagardev";
 inline constexpr std::string_view kIconCredit   = "Icons: Font Awesome Free 5 (fa-solid-900) by Fonticons, Inc. - "
                                                   "icons CC BY 4.0, font SIL OFL 1.1 (fontawesome.com).";
 
